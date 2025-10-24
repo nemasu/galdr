@@ -1,6 +1,7 @@
 {
   "name": "galdr",
   "version": "0.1.0",
+  "type": "module",
   "description": "CLI tool that combines multiple AI coding assistants (Claude, Gemini, Copilot)",
   "main": "dist/index.js",
   "bin": {
@@ -12,18 +13,30 @@
     "start": "node dist/index.js",
     "prepare": "npm run build"
   },
-  "keywords": ["cli", "ai", "assistant", "claude", "gemini", "copilot"],
+  "keywords": [
+    "cli",
+    "ai",
+    "assistant",
+    "claude",
+    "gemini",
+    "copilot"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "commander": "^12.1.0",
-    "inquirer": "^9.2.0",
     "chalk": "^4.1.2",
-    "ora": "^5.4.1"
+    "commander": "^12.1.0",
+    "ink": "6.2.3",
+    "ink-gradient": "^3.0.0",
+    "ink-spinner": "^5.0.0",
+    "inquirer": "^9.2.0",
+    "ora": "^5.4.1",
+    "react": "^19.2.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
     "@types/inquirer": "^9.0.7",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.2.2",
     "typescript": "^5.7.2"
   }
 }

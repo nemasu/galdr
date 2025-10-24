@@ -1,6 +1,6 @@
 # Galdr
 
-CLI tool that combines multiple AI coding assistants (Claude, Gemini, Copilot) with automatic provider switching and persistent context.
+CLI tool that combines multiple AI coding assistants (Claude, Gemini, Copilot, Cursor) with automatic provider switching and persistent context.
 
 **Note: This tool is not stable yet. Expect bugs & breaking changes.**
 
@@ -20,11 +20,8 @@ CLI tool that combines multiple AI coding assistants (Claude, Gemini, Copilot) w
   - **Manual**: User chooses provider
   - **Round-robin**: Cycle through providers for each request
   - Change modes in-chat with `/mode <mode>`
-- **Provider Identification**: Color-coded badges (CLAUDE: magenta, GEMINI: blue, COPILOT: green)
-- **Streaming Output**: Real-time display of AI responses
-- **Tool Execution**: Bypasses permission prompts for file operations and commands
 - **Usage Tracking**: Per-provider request counts
-- **No Configuration Required**: Uses existing CLI tools (claude, gemini, copilot)
+- **No Configuration Required**: Uses existing CLI tools (claude, gemini, copilot, cursor)
 
 ## Prerequisites
 
@@ -33,6 +30,7 @@ Install at least one of the following AI CLI tools:
 - [Claude CLI](https://claude.com/claude-code)
 - [Gemini CLI](https://github.com/google/generative-ai-cli)
 - [GitHub Copilot CLI](https://githubnext.com/projects/copilot-cli)
+- [Cursor CLI](https://www.cursor.com) Note: Very basic support
 
 ## Installation
 
@@ -65,12 +63,13 @@ galdr --provider gemini
 Available commands:
 
 - `/exit` or `/quit` - Exit chat
-- `/switch <provider>` - Switch provider (claude, gemini, copilot)
+- `/switch <provider>` - Switch provider (claude, gemini, copilot, cursor)
 - `/mode <mode>` - Change switch mode (manual, rollover, round-robin)
 - `/clear` - Clear history and screen
 - `/compact [keep]` - Compact history, keep N recent messages (default: 10)
 - `/history` - Show statistics (message count, size, age, auto-compact status)
 - `/status` - Show provider availability and usage
+- `/verbose` - Toggle verbose output mode
 - `/help` - Show commands
 
 Chat interface:
@@ -82,19 +81,6 @@ Chat interface:
 - Full conversation context sent to providers
 - Notifications for provider switches and auto-compaction
 - Auto-compact at 50 messages
-
-### Configuration
-
-```bash
-# Set default provider
-galdr config --provider claude
-
-# Set switch mode
-galdr config --mode rollover
-
-# Show current configuration
-galdr config --show
-```
 
 ### Context Management
 
@@ -123,10 +109,7 @@ galdr status
    - Context restored on startup
    - Full conversation history sent to providers
 
-2. **Provider Wrapping**: Spawns CLI tools (claude, gemini, copilot) as child processes
-   - Claude: `--permission-mode bypassPermissions`
-   - Gemini: `--approval-mode yolo`
-   - Copilot: `--allow-all-tools`
+2. **Provider Wrapping**: Spawns CLI tools (claude, gemini, copilot, cursor) as child processes
 
 3. **Provider Switching**: Detects token limit errors and switches based on configured mode
 
@@ -135,35 +118,6 @@ galdr status
    - Older messages summarized into single entry
    - Manual compact: `/compact [N]`
 
-5. **Configuration**: Settings stored in `.galdr/config.json`
-
-## Switch Modes
-
-### Rollover (Default)
-```bash
-galdr config --mode rollover
-```
-Switches to next available provider when token limit reached.
-
-### Manual
-```bash
-galdr config --mode manual
-```
-Notifies when token limit reached. Requires explicit provider change via `/switch <provider>` or `galdr config --provider <name>`.
-
-### Round-Robin
-```bash
-galdr config --mode round-robin
-```
-Cycles through providers for each request.
-
-## File Structure
-
-```
-.galdr/
-├── context.json    # Conversation history and current state
-└── config.json     # User preferences and settings
-```
 
 ## Development
 
@@ -181,33 +135,11 @@ npm run dev
 npm start chat "your prompt here"
 ```
 
-## Architecture
-
-```
-src/
-├── chat/
-│   ├── ui.ts           # Terminal UI components and styling
-│   └── session.ts      # Interactive chat session management
-├── config/
-│   └── manager.ts      # Configuration persistence
-├── context/
-│   └── manager.ts      # Conversation history management
-├── providers/
-│   ├── base.ts         # Abstract provider interface
-│   ├── index.ts        # Provider manager
-│   ├── claude.ts       # Claude provider implementation
-│   ├── gemini.ts       # Gemini provider implementation
-│   └── copilot.ts      # Copilot provider implementation
-└── index.ts            # CLI command definitions
-```
-
 ## Future Enhancements
 
-- Custom token limit thresholds per provider (currently fixed at 50 messages)
-- Configurable auto-compact settings (keep count, threshold)
-- Provider preference ordering for round-robin mode
-- Export conversation history to markdown or JSON
-- Multi-provider comparison mode (send same prompt to all providers simultaneously)
+- More tool messages
+- Tool model switching (like copilot)
+- Multi-provider comparison mode (send same prompt to all providers simultaneously)?
 - Session management (save/load named conversation sessions)
 - Search within conversation history
 

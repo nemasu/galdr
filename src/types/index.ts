@@ -1,4 +1,4 @@
-export type Provider = 'claude' | 'gemini' | 'copilot';
+export type Provider = 'claude' | 'gemini' | 'copilot' | 'cursor';
 
 export type SwitchMode = 'manual' | 'rollover' | 'round-robin';
 
@@ -17,6 +17,7 @@ export interface ConversationContext {
     claude: number;
     gemini: number;
     copilot: number;
+    cursor: number;
   };
 }
 

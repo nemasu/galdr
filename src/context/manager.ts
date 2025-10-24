@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ConversationContext, Message, Provider, SwitchMode } from '../types';
+import { ConversationContext, Message, Provider, SwitchMode } from '../types/index.js';
 
 const CONTEXT_DIR = '.galdr';
 const CONTEXT_FILE = 'context.json';
@@ -46,12 +46,13 @@ export class ContextManager {
   private createDefaultContext(): ConversationContext {
     return {
       messages: [],
-      currentProvider: 'claude',
-      switchMode: 'rollover',
+      currentProvider: 'claude', // Default: try claude first
+      switchMode: 'manual', // Default: manual switching
       providerUsage: {
         claude: 0,
         gemini: 0,
         copilot: 0,
+        cursor: 0,
       },
     };
   }
@@ -106,12 +107,18 @@ export class ContextManager {
     this.save();
   }
 
-  public getProviderUsage(): { claude: number; gemini: number; copilot: number } {
+  public getProviderUsage(): { claude: number; gemini: number; copilot: number; cursor: number } {
     return this.context.providerUsage;
   }
 
   public clear(): void {
-    this.context = this.createDefaultContext();
+    this.context.messages = [];
+    this.context.providerUsage = {
+      claude: 0,
+      gemini: 0,
+      copilot: 0,
+      cursor: 0,
+    };
     this.save();
   }
 
