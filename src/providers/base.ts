@@ -89,7 +89,12 @@ export abstract class BaseProvider {
   public async checkAvailability(): Promise<boolean> {
     return new Promise((resolve) => {
       const command = this.getCommand();
-      const child = spawn('which', [command.split(' ')[0]], {
+      const commandName = command.split(' ')[0];
+
+      // Use 'where' on Windows, 'which' on Unix-based systems
+      const checkCommand = process.platform === 'win32' ? 'where' : 'which';
+
+      const child = spawn(checkCommand, [commandName], {
         shell: true,
       });
 
