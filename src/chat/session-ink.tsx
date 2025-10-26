@@ -409,14 +409,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
         // Check round-robin mode
         const switchMode = context.getSwitchMode();
         if (switchMode === 'round-robin') {
-          const nextProvider = await providerManager.getNextAvailableProvider(currentProvider, 'round-robin');
+          const nextProvider = await providerManager.getNextAvailableProvider(provider, 'round-robin');
 
-          if (nextProvider && nextProvider !== currentProvider) {
-            const oldProvider = currentProvider;
+          if (nextProvider && nextProvider !== provider) {
             setCurrentProvider(nextProvider);
             context.setCurrentProvider(nextProvider);
             setNotifications([
-              { type: 'provider-switch', message: 'Round-robin mode', from: oldProvider, to: nextProvider },
+              { type: 'provider-switch', message: 'Round-robin mode', from: provider, to: nextProvider },
             ]);
           }
         }
