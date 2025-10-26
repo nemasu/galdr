@@ -1,24 +1,15 @@
 import React from 'react';
 import { Box, Text, Static } from 'ink';
-import { Provider } from '../../types/index.js';
-import { MessageDisplay } from './MessageDisplay.js';
+import { Provider, ToolInfo, Message, StreamItem } from '../../types/index.js';
+import { OutputItem } from './OutputItem.js';
 import { WelcomeScreen } from './WelcomeScreen.js';
-import { ProviderBadge, getProviderColor } from './ProviderBadge.js';
-import { ToolDisplay } from './ToolDisplay.js';
-import type { Message } from '../../types/index.js';
+import { ProviderBadge } from './ProviderBadge.js';
 
 interface Notification {
   type: 'info' | 'error' | 'success' | 'provider-switch';
   message: string;
   from?: Provider;
   to?: Provider;
-}
-
-interface ToolInfo {
-  id: string;
-  name: string;
-  parameters?: any;
-  status: 'running' | 'success' | 'failed';
 }
 
 interface ContentAreaProps {
@@ -28,8 +19,7 @@ interface ContentAreaProps {
   initialMessageCount: number;
   historyItems: React.ReactElement[];
   notifications: Notification[];
-  streamingContent?: string;
-  tools?: ToolInfo[];
+  streamingItems?: StreamItem[];
 }
 
 export const ContentArea: React.FC<ContentAreaProps> = React.memo(({
@@ -39,8 +29,7 @@ export const ContentArea: React.FC<ContentAreaProps> = React.memo(({
   initialMessageCount,
   historyItems,
   notifications,
-  streamingContent = '',
-  tools = [],
+  streamingItems = [],
 }) => {
   return (
     <Box flexDirection="column" flexGrow={1}>
@@ -55,20 +44,19 @@ export const ContentArea: React.FC<ContentAreaProps> = React.memo(({
         </Static>
       )}
 
-      {/* Display streaming content if any */}
-      {streamingContent && (
-        <Box flexDirection="column" marginY={1} paddingX={1}>
-          <Text bold color={getProviderColor(currentProvider)}>
-            {currentProvider.charAt(0).toUpperCase() + currentProvider.slice(1)}:
-          </Text>
-          <Text color="white">{streamingContent}</Text>
-        </Box>
+      {/* Display streaming content with tools (unified and interleaved) */}
+      {streamingItems.length > 0 && (
+        <OutputItem
+          message={{
+            role: 'assistant',
+            content: '', // Content is in streamItems
+            timestamp: Date.now(),
+            provider: currentProvider,
+            streamItems: streamingItems,
+          }}
+          isStreaming={true}
+        />
       )}
-
-      {/* Display tool usage */}
-      {tools.map((tool) => (
-        <ToolDisplay key={tool.id} name={tool.name} parameters={tool.parameters} status={tool.status} />
-      ))}
 
       {/* Display notifications */}
       {notifications.map((notif, idx) => {

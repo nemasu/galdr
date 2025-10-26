@@ -1,31 +1,22 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { render, Box, Text, useApp, Static } from 'ink';
-import { Provider, SwitchMode, Message } from '../types/index.js';
+import { Provider, SwitchMode, Message, ToolInfo, StreamItem } from '../types/index.js';
 import { ContextManager } from '../context/manager.js';
 import { ProviderManager } from '../providers/index.js';
-import { StatusBar } from './components/StatusBar.js';
-import { MessageDisplay } from './components/MessageDisplay.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { ProviderBadge } from './components/ProviderBadge.js';
 import { ContentArea } from './components/ContentArea.js';
+import { OutputItem } from './components/OutputItem.js';
 import { KeypressProvider, useKeypress, Key } from './contexts/KeypressContext.js';
 import { TextBuffer } from './utils/TextBuffer.js';
-import { InputPrompt } from './components/InputPrompt.js';
+import { InputArea } from './components/InputArea.js';
 import { InkWriter, InkWriterCallbacks } from './utils/InkWriter.js';
-import { ToolDisplay } from './components/ToolDisplay.js';
 
 interface Notification {
   type: 'info' | 'error' | 'success' | 'provider-switch';
   message: string;
   from?: Provider;
   to?: Provider;
-}
-
-interface ToolInfo {
-  id: string;
-  name: string;
-  parameters?: any;
-  status: 'running' | 'success' | 'failed';
 }
 
 interface ChatAppProps {
@@ -43,8 +34,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
   const [showWelcome, setShowWelcome] = useState(true);
   const [abortController, setAbortController] = useState(new AbortController());
   const [ctrlCCount, setCtrlCCount] = useState(0);
-  const [streamingContent, setStreamingContent] = useState('');
-  const [tools, setTools] = useState<ToolInfo[]>([]);
+  const [streamingItems, setStreamingItems] = useState<StreamItem[]>([]);
 
   const buffer = useMemo(() => new TextBuffer(), []);
   const initialMessageCount = useMemo(() => messages.length, []);
@@ -69,7 +59,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
   const historyItems = useMemo(
     () =>
       recentHistory.map((msg) => (
-        <MessageDisplay key={msg.timestamp} message={msg} />
+        <OutputItem key={msg.timestamp} message={msg} />
       )),
     [recentHistory]
   );
@@ -310,8 +300,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
 
   const handleUserInput = async (userInput: string) => {
     setNotifications([]);
-    setStreamingContent('');
-    setTools([]);
+    setStreamingItems([]);
 
     // Add user message
     const userMessage: Message = {
@@ -337,8 +326,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
 
   const executeWithProvider = async (prompt: string, provider: Provider) => {
     setIsLoading(true);
-    setStreamingContent('');
-    setTools([]);
+    setStreamingItems([]);
+    setNotifications([]); // Clear any notifications before streaming starts
 
     // Get conversation history
     const conversationHistory = context.getMessages().slice(0, -1);
@@ -347,20 +336,27 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     let currentToolId = 0;
     const writerCallbacks: InkWriterCallbacks = {
       onTextChunk: (chunk: string) => {
-        setStreamingContent((prev) => prev + chunk);
+        setStreamingItems((prev) => [...prev, { type: 'text', text: chunk }]);
       },
       onToolUse: (name: string, parameters?: any) => {
         const toolId = `tool-${currentToolId++}`;
-        setTools((prev) => [...prev, { id: toolId, name, parameters, status: 'running' }]);
+        const toolInfo: ToolInfo = { id: toolId, name, parameters, status: 'running' };
+        setStreamingItems((prev) => [...prev, { type: 'tool', tool: toolInfo }]);
       },
       onToolComplete: (success: boolean) => {
-        setTools((prev) => {
-          const newTools = [...prev];
-          const lastTool = newTools[newTools.length - 1];
-          if (lastTool) {
-            lastTool.status = success ? 'success' : 'failed';
+        setStreamingItems((prev) => {
+          const newItems = [...prev];
+          // Find the last tool item and update its status
+          for (let i = newItems.length - 1; i >= 0; i--) {
+            if (newItems[i].type === 'tool' && newItems[i].tool) {
+              newItems[i] = {
+                ...newItems[i],
+                tool: { ...newItems[i].tool!, status: success ? 'success' : 'failed' }
+              };
+              break;
+            }
           }
-          return newTools;
+          return newItems;
         });
       },
       onInfo: (message: string) => {
@@ -380,17 +376,30 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     setIsLoading(false);
 
     if (result.success && result.response) {
-      // Add assistant response
+      // Extract text and tools from streaming items
+      const textContent = streamingItems
+        .filter(item => item.type === 'text')
+        .map(item => item.text || '')
+        .join('');
+
+      const tools = streamingItems
+        .filter(item => item.type === 'tool')
+        .map(item => item.tool!)
+        .filter(tool => tool !== undefined);
+
+      // Add assistant response with tools
       const assistantMessage: Message = {
         role: 'assistant',
-        content: streamingContent || result.response,
+        content: textContent || result.response,
         timestamp: Date.now(),
         provider,
+        tools: tools.length > 0 ? tools : undefined,
+        streamItems: streamingItems.length > 0 ? streamingItems : undefined,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-      setStreamingContent('');
-      setTools([]);
+      setStreamingItems([]);
+      setNotifications([]); // Clear any notifications from streaming
 
       // Save assistant response to context
       const assistantResult = context.addMessage('assistant', result.response, provider);
@@ -414,7 +423,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
           if (nextProvider && nextProvider !== provider) {
             setCurrentProvider(nextProvider);
             context.setCurrentProvider(nextProvider);
-            setNotifications([
+            setNotifications((prev) => [
+              ...prev,
               { type: 'provider-switch', message: 'Round-robin mode', from: provider, to: nextProvider },
             ]);
           }
@@ -422,8 +432,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
       }
     } else {
       setNotifications([{ type: 'error', message: result.error || 'Unknown error occurred' }]);
-      setStreamingContent('');
-      setTools([]);
+      setStreamingItems([]);
 
       if (result.tokenLimitReached) {
         await handleTokenLimitReached(provider);
@@ -465,7 +474,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
 
   return (
     <Box flexDirection="column">
-      {/* Main content area - isolated from StatusBar updates */}
+      {/* Main output area - displays all messages, tools, and notifications */}
       <ContentArea
         showWelcome={showWelcome}
         currentProvider={currentProvider}
@@ -473,15 +482,17 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
         initialMessageCount={initialMessageCount}
         historyItems={historyItems}
         notifications={notifications}
-        streamingContent={streamingContent}
-        tools={tools}
+        streamingItems={streamingItems}
       />
 
-      {/* Fixed status bar at bottom */}
-      <StatusBar provider={currentProvider} isLoading={isLoading} />
-
-      {/* Input prompt */}
-      <InputPrompt buffer={buffer} onSubmit={handleSubmit} isActive={!isLoading} />
+      {/* Input area - includes provider badge and text input */}
+      <InputArea
+        buffer={buffer}
+        onSubmit={handleSubmit}
+        isActive={!isLoading}
+        provider={currentProvider}
+        isLoading={isLoading}
+      />
     </Box>
   );
 };

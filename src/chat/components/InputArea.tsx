@@ -1,23 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Box, Text } from 'ink';
+import { Provider } from '../../types/index.js';
 import { useKeypress, Key } from '../contexts/KeypressContext.js';
 import { TextBuffer } from '../utils/TextBuffer.js';
+import { ProviderBadge } from './ProviderBadge.js';
+import { CustomSpinner } from './CustomSpinner.js';
+import { getProviderColor } from './ProviderBadge.js';
 
-interface InputPromptProps {
+interface InputAreaProps {
   buffer: TextBuffer;
   onSubmit: (text: string) => void;
   isActive: boolean;
+  provider: Provider;
+  isLoading?: boolean;
   label?: string;
 }
 
-export const InputPrompt: React.FC<InputPromptProps> = React.memo(({
+export const InputArea: React.FC<InputAreaProps> = React.memo(({
   buffer,
   onSubmit,
   isActive,
+  provider,
+  isLoading = false,
   label = 'You> ',
 }) => {
   const [, forceUpdate] = useState(0);
   const [pasteInfo, setPasteInfo] = useState<{ lineCount: number } | null>(null);
+  const color = getProviderColor(provider);
 
   const handleKeypress = (key: Key) => {
     if (!isActive) return;
@@ -41,7 +50,7 @@ export const InputPrompt: React.FC<InputPromptProps> = React.memo(({
         forceUpdate((n) => n + 1);
         return;
       }
-      
+
       const text = buffer.getText();
       if (text.trim()) {
         onSubmit(text.trim());
@@ -149,19 +158,19 @@ export const InputPrompt: React.FC<InputPromptProps> = React.memo(({
   useKeypress(handleKeypress, { isActive });
 
   // Use paste info display if available, otherwise show actual text
-  const text = pasteInfo 
+  const text = pasteInfo
     ? `[Pasted ${pasteInfo.lineCount} line${pasteInfo.lineCount !== 1 ? 's' : ''}]`
     : buffer.getDisplayText();
   const cursorPos = buffer.getCursorDisplayPosition();
 
   // Split text into lines
   const lines = pasteInfo ? [text] : text.split('\n');
-  
+
   // Find which line the cursor is on
   let charsProcessed = 0;
   let cursorLine = 0;
   let cursorCol = cursorPos;
-  
+
   if (!pasteInfo) {
     for (let i = 0; i < lines.length; i++) {
       const lineLength = lines[i].length;
@@ -180,6 +189,21 @@ export const InputPrompt: React.FC<InputPromptProps> = React.memo(({
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
+      {/* Provider badge and status */}
+      <Box marginBottom={1}>
+        {isLoading ? (
+          <>
+            <CustomSpinner />
+            <Text> </Text>
+          </>
+        ) : (
+          <Text color={color}>●</Text>
+        )}
+        <Text> </Text>
+        <ProviderBadge provider={provider} />
+      </Box>
+
+      {/* Input prompt */}
       <Box flexDirection="column">
         {lines.map((line, idx) => {
           if (idx === cursorLine) {
@@ -199,7 +223,8 @@ export const InputPrompt: React.FC<InputPromptProps> = React.memo(({
                 ) : (
                   <>
                     <Text>{beforeCursor}</Text>
-                    <Text inverse>{atCursor}</Text>
+                    {isActive && <Text inverse>{atCursor}</Text>}
+                    {!isActive && <Text dimColor>{atCursor}</Text>}
                     <Text>{afterCursor}</Text>
                   </>
                 )}
@@ -222,7 +247,11 @@ export const InputPrompt: React.FC<InputPromptProps> = React.memo(({
     </Box>
   );
 }, (prevProps, nextProps) => {
-  // Only re-render if isActive or label changes
-  // The buffer itself manages its own state and forces updates internally
-  return prevProps.isActive === nextProps.isActive && prevProps.label === nextProps.label;
+  // Re-render if any of these props change
+  return (
+    prevProps.isActive === nextProps.isActive &&
+    prevProps.label === nextProps.label &&
+    prevProps.provider === nextProps.provider &&
+    prevProps.isLoading === nextProps.isLoading
+  );
 });

@@ -30,6 +30,7 @@ export class ClaudeProvider extends BaseProvider {
   parseOutput(output: string): ProviderResult {
     // Parse stream-json output line by line
     const lines = output.trim().split("\n");
+    let textContent: string[] = [];
     let finalResult = "";
 
     for (const line of lines) {
@@ -38,7 +39,16 @@ export class ClaudeProvider extends BaseProvider {
       try {
         const event: StreamEvent = JSON.parse(line);
 
-        // Extract final result
+        // Extract text from assistant messages
+        if (event.type === "assistant" && event.message?.content) {
+          for (const content of event.message.content) {
+            if (content.type === "text" && content.text) {
+              textContent.push(content.text);
+            }
+          }
+        }
+
+        // Extract final result (this is usually empty for Claude Code)
         if (event.type === "result" && event.result) {
           finalResult = event.result;
         }
@@ -49,9 +59,12 @@ export class ClaudeProvider extends BaseProvider {
       }
     }
 
+    // Prefer accumulated text content, then result, then raw output
+    const response = textContent.join("") || finalResult || output;
+
     return {
       success: true,
-      response: finalResult || output,
+      response: response,
     };
   }
 
@@ -72,9 +85,7 @@ export class ClaudeProvider extends BaseProvider {
 
         switch (event.type) {
           case "system":
-            if (event.subtype === "init" && this.inkWriter) {
-              this.inkWriter.showInfo('⚙️  Initializing...');
-            }
+            // System events - silently handle initialization
             break;
 
           case "assistant":
@@ -85,9 +96,8 @@ export class ClaudeProvider extends BaseProvider {
                   if (!this.firstChunkReceived && this.onFirstChunk) {
                     this.onFirstChunk();
                     this.firstChunkReceived = true;
-                    // Skip writing this chunk to avoid spinner/output conflict
-                    continue;
                   }
+                  // Write the text chunk (don't skip it!)
                   if (this.inkWriter) {
                     this.inkWriter.writeText(content.text);
                   }

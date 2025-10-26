@@ -74,10 +74,8 @@ export class GeminiProvider extends BaseProvider {
               if (!this.firstChunkReceived && this.onFirstChunk) {
                 this.onFirstChunk();
                 this.firstChunkReceived = true;
-                // Skip writing this chunk to avoid spinner/output conflict
-                break;
               }
-              // Stream assistant messages in real-time
+              // Stream assistant messages in real-time (don't skip first chunk!)
               if (this.inkWriter) {
                 this.inkWriter.writeText(event.content);
               }

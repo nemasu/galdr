@@ -1,10 +1,6 @@
-export { ChatUI } from './ChatUI.js';
-export { StatusBar } from './StatusBar.js';
-export { MessageDisplay } from './MessageDisplay.js';
 export { ProviderBadge, getProviderColor } from './ProviderBadge.js';
 export { WelcomeScreen } from './WelcomeScreen.js';
 export { ContentArea } from './ContentArea.js';
-export { InputPrompt } from './InputPrompt.js';
 export { CustomSpinner } from './CustomSpinner.js';
-export { ToolDisplay } from './ToolDisplay.js';
-export { StreamingText, useStreamingText } from './StreamingText.js';
+export { InputArea } from './InputArea.js';
+export { OutputItem } from './OutputItem.js';
