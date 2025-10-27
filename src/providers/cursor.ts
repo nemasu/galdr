@@ -8,8 +8,12 @@ export class CursorProvider extends BaseProvider {
     super('cursor');
   }
 
-  getCommand(): string {
-    return 'cursor-agent --force --output-format stream-json';
+  getCommand(model?: string): string {
+    const baseCommand = 'cursor-agent --force --output-format stream-json';
+    if (model && model !== 'default') {
+      return `${baseCommand} --model ${model}`;
+    }
+    return baseCommand;
   }
 
   parseOutput(output: string): ProviderResult {

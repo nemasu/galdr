@@ -65,6 +65,7 @@ Available commands:
 - `/exit` or `/quit` - Exit chat
 - `/switch <provider>` - Switch provider (claude, gemini, copilot, cursor)
 - `/mode <mode>` - Change switch mode (manual, rollover, round-robin)
+- `/model <provider> <model>` - Set model for a provider (e.g., `/model copilot claude-sonnet-4.5`)
 - `/clear` - Clear history and screen
 - `/compact [keep]` - Compact history, keep N recent messages (default: 10)
 - `/history` - Show statistics (message count, size, age, auto-compact status)
@@ -115,7 +116,6 @@ galdr status
 
 4. **Auto-compact**: Triggered when message count exceeds 50
    - Keeps 20 most recent messages
-   - Older messages summarized into single entry
    - Manual compact: `/compact [N]`
 
 
@@ -137,8 +137,8 @@ npm start chat "your prompt here"
 
 ## Future Enhancements
 
-- More tool messages
-- Tool model switching (like copilot)
+- Better tool messages
+- Summarize old history into single entry for compacting
 - Multi-provider comparison mode (send same prompt to all providers simultaneously)?
 - Session management (save/load named conversation sessions)
 - Search within conversation history

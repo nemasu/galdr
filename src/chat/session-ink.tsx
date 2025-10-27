@@ -11,6 +11,7 @@ import { KeypressProvider, useKeypress, Key } from './contexts/KeypressContext.j
 import { TextBuffer } from './utils/TextBuffer.js';
 import { InputArea } from './components/InputArea.js';
 import { InkWriter, InkWriterCallbacks } from './utils/InkWriter.js';
+import { findLastSafeSplitPoint, getAccumulatedText } from './utils/messageSplitting.js';
 
 interface Notification {
   type: 'info' | 'error' | 'success' | 'provider-switch';
@@ -185,6 +186,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
         handleVerboseCommand();
         break;
 
+      case 'model':
+        handleModelCommand(args);
+        break;
+
       default:
         setNotifications([
           { type: 'error', message: `Unknown command: /${cmd}. Type /help for available commands.` },
@@ -268,7 +273,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     for (const provider of providers) {
       const available = availability.get(provider) || false;
       const status = available ? '✓ Available' : '✗ Not found';
-      statusLines.push(`${provider}: ${status} (${usage[provider]} requests)`);
+      const model = context.getProviderModel(provider);
+      statusLines.push(`${provider}: ${status} (${usage[provider]} requests, model: ${model})`);
     }
 
     setNotifications([{ type: 'info', message: `Provider Status:\n${statusLines.join('\n')}` }]);
@@ -285,6 +291,26 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
       delete process.env.GALDR_VERBOSE;
       setNotifications([{ type: 'success', message: 'Verbose mode disabled' }]);
     }
+  };
+
+  const handleModelCommand = (args: string[]) => {
+    if (args.length < 2) {
+      setNotifications([
+        { type: 'error', message: 'Usage: /model <provider> <model>\nExample: /model claude claude-3-5-sonnet-20241022' },
+      ]);
+      return;
+    }
+
+    const provider = args[0] as Provider;
+    const model = args[1];
+
+    if (!['claude', 'gemini', 'copilot', 'cursor'].includes(provider)) {
+      setNotifications([{ type: 'error', message: 'Invalid provider. Must be: claude, gemini, copilot, or cursor' }]);
+      return;
+    }
+
+    context.setProviderModel(provider, model);
+    setNotifications([{ type: 'success', message: `Model for ${provider} set to: ${model}` }]);
   };
 
   const handleSubmit = async (input: string) => {
@@ -334,39 +360,156 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
 
     // Use a local variable to track streaming items to avoid stale closure issues
     let accumulatedStreamItems: StreamItem[] = [];
+    let updateTimeoutId: NodeJS.Timeout | null = null;
+    let pendingUpdate = false;
+    const SPLIT_THRESHOLD = 2000; // Split messages larger than 2000 chars
+
+    // Throttled update function to batch re-renders
+    const scheduleUpdate = () => {
+      if (pendingUpdate) return;
+      pendingUpdate = true;
+
+      if (updateTimeoutId) {
+        clearTimeout(updateTimeoutId);
+      }
+
+      updateTimeoutId = setTimeout(() => {
+        setStreamingItems([...accumulatedStreamItems]);
+        pendingUpdate = false;
+        updateTimeoutId = null;
+      }, 16); // ~60fps
+    };
+
+    // Helper to split and move completed portion to messages
+    const splitAndMoveToMessages = () => {
+      const accumulatedText = getAccumulatedText(accumulatedStreamItems);
+      const splitPoint = findLastSafeSplitPoint(accumulatedText);
+
+      // Only split if we found a valid split point (not at the end)
+      if (splitPoint >= accumulatedText.length || splitPoint === 0) {
+        return; // No valid split point
+      }
+
+      // Find which items and where to split
+      let charCount = 0;
+      let splitItemIndex = -1;
+      let splitWithinItemAt = -1;
+
+      for (let i = 0; i < accumulatedStreamItems.length; i++) {
+        const item = accumulatedStreamItems[i];
+        if (item.type === 'text' && item.text) {
+          const itemLength = item.text.length;
+          if (charCount + itemLength >= splitPoint) {
+            // Split point is within this item
+            splitItemIndex = i;
+            splitWithinItemAt = splitPoint - charCount;
+            break;
+          }
+          charCount += itemLength;
+        }
+      }
+
+      if (splitItemIndex === -1) return; // Shouldn't happen, but safety check
+
+      // Create items for completed message
+      const completedItems: StreamItem[] = [];
+      for (let i = 0; i < splitItemIndex; i++) {
+        completedItems.push(accumulatedStreamItems[i]);
+      }
+
+      // Split the text item at splitItemIndex
+      const splitItem = accumulatedStreamItems[splitItemIndex];
+      if (splitItem.type === 'text' && splitItem.text) {
+        const beforeText = splitItem.text.substring(0, splitWithinItemAt);
+        const afterText = splitItem.text.substring(splitWithinItemAt);
+
+        if (beforeText) {
+          completedItems.push({ type: 'text' as const, text: beforeText });
+        }
+
+        // Keep remaining items (including afterText and everything after)
+        const remainingItems: StreamItem[] = [];
+        if (afterText) {
+          remainingItems.push({ type: 'text' as const, text: afterText });
+        }
+        for (let i = splitItemIndex + 1; i < accumulatedStreamItems.length; i++) {
+          remainingItems.push(accumulatedStreamItems[i]);
+        }
+
+        // Create completed message and add to messages
+        if (completedItems.length > 0) {
+          const completedText = completedItems
+            .filter(item => item.type === 'text')
+            .map(item => item.text || '')
+            .join('');
+
+          const completedTools = completedItems
+            .filter(item => item.type === 'tool')
+            .map(item => item.tool!)
+            .filter(tool => tool !== undefined);
+
+          const completedMessage: Message = {
+            role: 'assistant',
+            content: completedText,
+            timestamp: Date.now(),
+            provider,
+            tools: completedTools.length > 0 ? completedTools : undefined,
+            streamItems: completedItems,
+          };
+
+          // Add to messages (will render in Static component)
+          setMessages((prev) => [...prev, completedMessage]);
+
+          // Keep only remaining items for continued streaming
+          accumulatedStreamItems = remainingItems;
+        }
+      }
+    };
 
     // Create InkWriter callbacks
     let currentToolId = 0;
     const writerCallbacks: InkWriterCallbacks = {
       onTextChunk: (chunk: string) => {
-        const newItem = { type: 'text' as const, text: chunk };
-        accumulatedStreamItems = [...accumulatedStreamItems, newItem];
-        setStreamingItems(accumulatedStreamItems);
+        // Accumulate text into the last item if it's also text
+        const lastItem = accumulatedStreamItems[accumulatedStreamItems.length - 1];
+        if (lastItem && lastItem.type === 'text') {
+          lastItem.text = (lastItem.text || '') + chunk;
+        } else {
+          accumulatedStreamItems.push({ type: 'text' as const, text: chunk });
+        }
+
+        // Check if we should split the message
+        const accumulatedText = getAccumulatedText(accumulatedStreamItems);
+        if (accumulatedText.length > SPLIT_THRESHOLD) {
+          splitAndMoveToMessages();
+        }
+
+        scheduleUpdate();
       },
       onToolUse: (name: string, parameters?: any) => {
         const toolId = `tool-${currentToolId++}`;
         const toolInfo: ToolInfo = { id: toolId, name, parameters, status: 'running' };
         const newItem = { type: 'tool' as const, tool: toolInfo };
-        accumulatedStreamItems = [...accumulatedStreamItems, newItem];
-        setStreamingItems(accumulatedStreamItems);
+        accumulatedStreamItems.push(newItem);
+        scheduleUpdate();
       },
       onToolComplete: (success: boolean) => {
-        const newItems = [...accumulatedStreamItems];
         // Find the last tool item and update its status
-        for (let i = newItems.length - 1; i >= 0; i--) {
-          if (newItems[i].type === 'tool' && newItems[i].tool) {
-            newItems[i] = {
-              ...newItems[i],
-              tool: { ...newItems[i].tool!, status: success ? 'success' : 'failed' }
+        for (let i = accumulatedStreamItems.length - 1; i >= 0; i--) {
+          if (accumulatedStreamItems[i].type === 'tool' && accumulatedStreamItems[i].tool) {
+            accumulatedStreamItems[i] = {
+              ...accumulatedStreamItems[i],
+              tool: { ...accumulatedStreamItems[i].tool!, status: success ? 'success' : 'failed' }
             };
             break;
           }
         }
-        accumulatedStreamItems = newItems;
-        setStreamingItems(newItems);
+        scheduleUpdate();
       },
       onInfo: (message: string) => {
-        setNotifications([{ type: 'info', message }]);
+        const newItem = { type: 'info' as const, info: message };
+        accumulatedStreamItems.push(newItem);
+        scheduleUpdate();
       },
     };
 
@@ -375,10 +518,22 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
 
     const providerInstance = providerManager.getProvider(provider);
     providerInstance.setInkWriter(inkWriter);
+    
+    // Set the model for this provider
+    const model = context.getProviderModel(provider);
+    providerInstance.setModel(model);
 
     const result = await providerInstance.execute(prompt, conversationHistory, undefined, undefined, abortController.signal);
 
     inkWriter.deactivate();
+
+    // Clear any pending timeout and do final update
+    if (updateTimeoutId) {
+      clearTimeout(updateTimeoutId);
+      updateTimeoutId = null;
+    }
+    setStreamingItems([...accumulatedStreamItems]);
+
     setIsLoading(false);
 
     if (result.success && result.response) {

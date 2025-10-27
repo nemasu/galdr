@@ -10,9 +10,10 @@ export interface ToolInfo {
 }
 
 export interface StreamItem {
-  type: 'text' | 'tool';
+  type: 'text' | 'tool' | 'info';
   text?: string;
   tool?: ToolInfo;
+  info?: string;
 }
 
 export interface Message {
@@ -33,6 +34,12 @@ export interface ConversationContext {
     gemini: number;
     copilot: number;
     cursor: number;
+  };
+  providerModels?: {
+    claude?: string;
+    gemini?: string;
+    copilot?: string;
+    cursor?: string;
   };
 }
 

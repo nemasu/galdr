@@ -48,6 +48,9 @@ export const KeypressProvider: React.FC<KeypressProviderProps> = ({ children }) 
       setRawMode(true);
     }
 
+    // Enable bracketed paste mode
+    process.stdout.write('\x1b[?2004h');
+
     // Enable keypress events
     emitKeypressEvents(stdin);
 
@@ -107,6 +110,8 @@ export const KeypressProvider: React.FC<KeypressProviderProps> = ({ children }) 
     // Cleanup - restore previous raw mode state
     return () => {
       stdin.off('keypress', handleKeypress);
+      // Disable bracketed paste mode
+      process.stdout.write('\x1b[?2004l');
       if (wasRaw === false) {
         setRawMode(false);
       }

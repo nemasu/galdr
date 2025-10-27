@@ -84,6 +84,13 @@ export const OutputItem: React.FC<OutputItemProps> = React.memo(({ message, isSt
               } else if (item.type === 'tool' && item.tool) {
                 flushTextBuffer();
                 elements.push(<ToolInfoDisplay key={`stream-${idx}`} tool={item.tool} />);
+              } else if (item.type === 'info' && item.info) {
+                flushTextBuffer();
+                elements.push(
+                  <Box key={`info-${idx}`} marginTop={1} paddingLeft={2}>
+                    <Text color="cyan" dimColor>ℹ {item.info}</Text>
+                  </Box>
+                );
               }
             });
 

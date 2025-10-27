@@ -23,8 +23,12 @@ export class ClaudeProvider extends BaseProvider {
     super("claude");
   }
 
-  getCommand(): string {
-    return "claude --print --permission-mode bypassPermissions --output-format stream-json --verbose";
+  getCommand(model?: string): string {
+    const baseCommand = "claude --print --permission-mode bypassPermissions --output-format stream-json --verbose";
+    if (model && model !== 'default') {
+      return `${baseCommand} --model ${model}`;
+    }
+    return baseCommand;
   }
 
   parseOutput(output: string): ProviderResult {

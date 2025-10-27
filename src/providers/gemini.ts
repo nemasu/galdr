@@ -20,9 +20,12 @@ export class GeminiProvider extends BaseProvider {
     super('gemini');
   }
 
-  getCommand(): string {
-    // Gemini uses piped input, so no --prompt flag or -- needed
-    return 'gemini --approval-mode yolo --output-format stream-json';
+  getCommand(model?: string): string {
+    const baseCommand = 'gemini --approval-mode yolo --output-format stream-json';
+    if (model && model !== 'default') {
+      return `${baseCommand} --model ${model}`;
+    }
+    return baseCommand;
   }
 
   parseOutput(output: string): ProviderResult {
@@ -121,12 +124,12 @@ export class GeminiProvider extends BaseProvider {
     ];
 
     if (process.env.GALDR_VERBOSE) {
-      console.error(chalk.dim(`[VERBOSE] Gemini detectTokenLimit checking output length: ${output.length}`));
+      this.showVerbose(`Gemini detectTokenLimit checking output length: ${output.length}`);
       const matched = errorPatterns.find((pattern) => pattern.test(output));
       if (matched) {
-        console.error(chalk.dim(`[VERBOSE] Gemini token limit detected with pattern: ${matched}`));
+        this.showVerbose(`Gemini token limit detected with pattern: ${matched}`);
       } else {
-        console.error(chalk.dim(`[VERBOSE] Gemini no token limit pattern matched`));
+        this.showVerbose(`Gemini no token limit pattern matched`);
       }
     }
 

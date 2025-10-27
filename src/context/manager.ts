@@ -54,6 +54,12 @@ export class ContextManager {
         copilot: 0,
         cursor: 0,
       },
+      providerModels: {
+        claude: 'default',
+        gemini: 'default',
+        copilot: 'default',
+        cursor: 'default',
+      },
     };
   }
 
@@ -179,5 +185,31 @@ export class ContextManager {
 
   public getAutoCompactThreshold(): number {
     return AUTO_COMPACT_THRESHOLD;
+  }
+
+  public setProviderModel(provider: Provider, model: string): void {
+    if (!this.context.providerModels) {
+      this.context.providerModels = {
+        claude: 'default',
+        gemini: 'default',
+        copilot: 'default',
+        cursor: 'default',
+      };
+    }
+    this.context.providerModels[provider] = model;
+    this.save();
+  }
+
+  public getProviderModel(provider: Provider): string {
+    if (!this.context.providerModels) {
+      this.context.providerModels = {
+        claude: 'default',
+        gemini: 'default',
+        copilot: 'default',
+        cursor: 'default',
+      };
+      this.save();
+    }
+    return this.context.providerModels[provider] || 'default';
   }
 }

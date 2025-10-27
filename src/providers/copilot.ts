@@ -20,9 +20,12 @@ export class CopilotProvider extends BaseProvider {
     super('copilot');
   }
 
-  getCommand(): string {
-    // Use -- to terminate option parsing, preventing conversation history from being interpreted as flags
-    return 'copilot --allow-all-tools --stream on';
+  getCommand(model?: string): string {
+    const baseCommand = 'copilot --allow-all-tools --stream on';
+    if (model && model !== 'default') {
+      return `${baseCommand} --model ${model}`;
+    }
+    return baseCommand;
   }
 
   parseOutput(output: string): ProviderResult {
@@ -46,8 +49,7 @@ export class CopilotProvider extends BaseProvider {
       const chunk = data.toString();
       stdout += chunk;
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] copilot stdout chunk (${chunk.length} bytes):`));
-        console.error(chalk.dim(chunk));
+        this.showVerbose(`copilot stdout chunk (${chunk.length} bytes):\n${chunk}`);
       }
       if (onStream) {
         onStream(chunk);
@@ -59,8 +61,7 @@ export class CopilotProvider extends BaseProvider {
       const chunk = data.toString();
       stderr += chunk;
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] copilot stderr chunk (${chunk.length} bytes):`));
-        console.error(chalk.dim(chunk));
+        this.showVerbose(`copilot stderr chunk (${chunk.length} bytes):\n${chunk}`);
       }
       if (process.env.DEBUG) {
         process.stderr.write(chunk);
@@ -69,13 +70,11 @@ export class CopilotProvider extends BaseProvider {
 
     child.on('close', (code: number) => {
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] ========== COPILOT RESPONSE COMPLETE ==========`));
-        console.error(chalk.dim(`[VERBOSE] Process exited with code: ${code}`));
-        console.error(chalk.dim(`[VERBOSE] Full stdout (${stdout.length} bytes):`));
-        console.error(chalk.dim(stdout));
-        console.error(chalk.dim(`[VERBOSE] Full stderr (${stderr.length} bytes):`));
-        console.error(chalk.dim(stderr));
-        console.error(chalk.dim(`[VERBOSE] ================================================`));
+        this.showVerbose(`========== COPILOT RESPONSE COMPLETE ==========`);
+        this.showVerbose(`Process exited with code: ${code}`);
+        this.showVerbose(`Full stdout (${stdout.length} bytes):\n${stdout}`);
+        this.showVerbose(`Full stderr (${stderr.length} bytes):\n${stderr}`);
+        this.showVerbose(`================================================`);
       }
       if (code !== 0) {
         const combinedOutput = stdout + stderr;

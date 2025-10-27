@@ -80,6 +80,10 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           <Text color="white">Toggle verbose output mode</Text>
         </Box>
         <Box>
+          <Text color="gray">  /model &lt;p&gt; &lt;model&gt; </Text>
+          <Text color="white">Set model for provider (e.g., /model claude default)</Text>
+        </Box>
+        <Box>
           <Text color="gray">  /help              </Text>
           <Text color="white">Show this help</Text>
         </Box>

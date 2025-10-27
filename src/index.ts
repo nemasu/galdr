@@ -72,6 +72,7 @@ program
   .description('Configure Galdr settings')
   .option('-p, --provider <provider>', 'Set current provider')
   .option('-m, --mode <mode>', 'Set switch mode (manual, rollover, round-robin)')
+  .option('--model <provider> <model>', 'Set model for a provider')
   .option('-s, --show', 'Show current configuration')
   .action(async (options) => {
     const context = new ContextManager();
@@ -80,6 +81,12 @@ program
       console.log(chalk.blue('Current Configuration:'));
       console.log(`  Current Provider: ${context.getCurrentProvider()}`);
       console.log(`  Switch Mode: ${context.getSwitchMode()}`);
+      console.log(chalk.blue('\nProvider Models:'));
+      const providers: Provider[] = ['claude', 'gemini', 'copilot', 'cursor'];
+      for (const provider of providers) {
+        const model = context.getProviderModel(provider);
+        console.log(`  ${provider}: ${model}`);
+      }
       return;
     }
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import { Provider } from '../../types/index.js';
 import { useKeypress, Key } from '../contexts/KeypressContext.js';
 import { TextBuffer } from '../utils/TextBuffer.js';
@@ -26,6 +26,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
 }) => {
   const [, forceUpdate] = useState(0);
   const [pasteInfo, setPasteInfo] = useState<{ lineCount: number } | null>(null);
+  const { stdout } = useStdout();
   const color = getProviderColor(provider);
 
   const handleKeypress = (key: Key) => {
@@ -36,7 +37,14 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
       buffer.insertText(key.pasteContent);
       // Count lines - handle Windows (\r\n), Unix (\n), and old Mac (\r) line endings
       const lineCount = key.pasteContent.split(/\r\n|\r|\n/).length;
-      setPasteInfo({ lineCount });
+      const terminalWidth = stdout?.columns || 80;
+      const labelWidth = label.length;
+      const contentWidth = key.pasteContent.length;
+      
+      // Only show paste info if more than 1 line OR if content exceeds terminal width
+      if (lineCount > 1 || (contentWidth + labelWidth) > terminalWidth) {
+        setPasteInfo({ lineCount });
+      }
       forceUpdate((n) => n + 1);
       return;
     }

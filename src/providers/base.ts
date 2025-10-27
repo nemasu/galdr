@@ -8,12 +8,13 @@ export abstract class BaseProvider {
   protected firstChunkReceived: boolean = false;
   protected onFirstChunk?: () => void;
   protected inkWriter?: InkWriter;
+  protected model?: string;
 
   constructor(name: Provider) {
     this.name = name;
   }
 
-  abstract getCommand(): string;
+  abstract getCommand(model?: string): string;
 
   abstract parseOutput(output: string): ProviderResult;
 
@@ -39,6 +40,16 @@ export abstract class BaseProvider {
     return !hiddenTools.includes(toolName);
   }
 
+  // Helper method to show verbose messages inline with output
+  protected showVerbose(message: string): void {
+    if (this.inkWriter) {
+      this.inkWriter.showInfo(`[VERBOSE] ${message}`);
+    } else {
+      // Fallback to console.error if InkWriter is not available
+      console.error(chalk.dim(`[VERBOSE] ${message}`));
+    }
+  }
+
   protected handleChildProcess(
     child: ReturnType<typeof spawn>,
     onStream: ((chunk: string) => void) | undefined,
@@ -47,34 +58,74 @@ export abstract class BaseProvider {
   ): void {
     let stdout = '';
     let stderr = '';
+    let isAborted = false;
 
     if (process.env.GALDR_VERBOSE) {
-      console.error(chalk.dim(`[VERBOSE] Child process spawned with PID: ${child.pid}`));
+      this.showVerbose(`Child process spawned with PID: ${child.pid}`);
     }
 
     // Handle cancellation
     if (signal) {
-      signal.onabort = () => {
-        if (child.pid) {
+      signal.addEventListener('abort', () => {
+        if (child.pid && !isAborted) {
+          isAborted = true;
           if (process.env.GALDR_VERBOSE) {
-            console.error(chalk.dim(`[VERBOSE] Abort signal received, killing child process ${child.pid}`));
+            this.showVerbose(`Abort signal received, killing child process ${child.pid}`);
           }
-          child.kill(); // Send SIGTERM, or SIGKILL if already terminated
-          resolve({
-            success: false,
-            error: 'Operation cancelled',
-            tokenLimitReached: false,
-          });
+
+          if (process.platform === 'win32') {
+            // Kill the entire process tree on Windows - use BOTH methods for maximum reliability
+
+            // Method 1: taskkill with /F (force, equivalent to kill -9) and /T (tree)
+            const taskkillProcess = spawn('taskkill', ['/PID', child.pid.toString(), '/T', '/F'], {
+              windowsHide: true
+            });
+
+            taskkillProcess.on('close', (code) => {
+              if (process.env.GALDR_VERBOSE) {
+                this.showVerbose(`taskkill /F /T exited with code ${code}`);
+              }
+            });
+
+            // Method 2: PowerShell recursive kill for any orphaned processes
+            const killScript = `
+              function Kill-ProcessTree {
+                param([int]$ProcessId)
+                Get-CimInstance Win32_Process | Where-Object { $_.ParentProcessId -eq $ProcessId } | ForEach-Object { Kill-ProcessTree $_.ProcessId }
+                Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+              }
+              Kill-ProcessTree ${child.pid}
+            `.trim();
+
+            const killProcess = spawn('powershell.exe', ['-NoProfile', '-Command', killScript], {
+              windowsHide: true
+            });
+
+            killProcess.on('close', (code) => {
+              if (process.env.GALDR_VERBOSE) {
+                this.showVerbose(`PowerShell kill exited with code ${code}`);
+              }
+            });
+
+            // Method 3: Kill the child handle directly
+            child.kill('SIGKILL');
+          } else {
+            // Kill the entire process group using the parent PID
+            // This is more reliable for stopping processes that spawn children
+            process.kill(-child.pid, 'SIGKILL');
+            child.kill('SIGKILL');
+          }
+
+          // Don't resolve here - let the close handler do it
         }
-      };
+      });
     }
 
     child.stdout?.on('data', (data) => {
       const chunk = data.toString();
       stdout += chunk;
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] stdout chunk (${chunk.length} bytes):`));
-        console.error(chalk.dim(chunk));
+        this.showVerbose(`stdout chunk (${chunk.length} bytes):\n${chunk}`);
       }
       if (onStream) {
         onStream(chunk);
@@ -86,8 +137,7 @@ export abstract class BaseProvider {
       const chunk = data.toString();
       stderr += chunk;
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] stderr chunk (${chunk.length} bytes):`));
-        console.error(chalk.dim(chunk));
+        this.showVerbose(`stderr chunk (${chunk.length} bytes):\n${chunk}`);
       }
       if (process.env.DEBUG) {
         process.stderr.write(chunk);
@@ -96,14 +146,23 @@ export abstract class BaseProvider {
 
     child.on('close', (code) => {
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] ========== PROVIDER RESPONSE COMPLETE ==========`));
-        console.error(chalk.dim(`[VERBOSE] Process exited with code: ${code}`));
-        console.error(chalk.dim(`[VERBOSE] Full stdout (${stdout.length} bytes):`));
-        console.error(chalk.dim(stdout));
-        console.error(chalk.dim(`[VERBOSE] Full stderr (${stderr.length} bytes):`));
-        console.error(chalk.dim(stderr));
-        console.error(chalk.dim(`[VERBOSE] ===============================================`));
+        this.showVerbose(`========== PROVIDER RESPONSE COMPLETE ==========`);
+        this.showVerbose(`Process exited with code: ${code}`);
+        this.showVerbose(`Full stdout (${stdout.length} bytes):\n${stdout}`);
+        this.showVerbose(`Full stderr (${stderr.length} bytes):\n${stderr}`);
+        this.showVerbose(`===============================================`);
       }
+
+      // If we aborted, resolve with cancellation error
+      if (isAborted) {
+        resolve({
+          success: false,
+          error: 'Operation cancelled',
+          tokenLimitReached: false,
+        });
+        return;
+      }
+
       if (code !== 0) {
         const combinedOutput = stdout + stderr;
         resolve({
@@ -117,16 +176,16 @@ export abstract class BaseProvider {
       const combinedOutput = stdout + stderr;
       result.tokenLimitReached = this.detectTokenLimit(combinedOutput);
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] Parsed response length: ${result.response?.length || 0} characters`));
-        console.error(chalk.dim(`[VERBOSE] Token limit reached: ${result.tokenLimitReached}`));
+        this.showVerbose(`Parsed response length: ${result.response?.length || 0} characters`);
+        this.showVerbose(`Token limit reached: ${result.tokenLimitReached}`);
       }
       resolve(result);
     });
 
     child.on('error', (error) => {
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] Child process error: ${error.message}`));
-        console.error(chalk.dim(`[VERBOSE] Error stack: ${error.stack}`));
+        this.showVerbose(`Child process error: ${error.message}`);
+        this.showVerbose(`Error stack: ${error.stack}`);
       }
       resolve({
         success: false,
@@ -157,13 +216,17 @@ export abstract class BaseProvider {
     this.inkWriter = writer;
   }
 
+  public setModel(model?: string): void {
+    this.model = model;
+  }
+
   public async execute(prompt: string, conversationHistory: Message[] = [], onStream?: (chunk: string) => void, onFirstChunk?: () => void, signal?: AbortSignal): Promise<ProviderResult> {
     // Reset for each execution
     this.firstChunkReceived = false;
     this.onFirstChunk = onFirstChunk;
     
     return new Promise((resolve) => {
-      const command = this.getCommand();
+      const command = this.getCommand(this.model);
       let stdout = '';
       let stderr = '';
 
@@ -177,33 +240,29 @@ export abstract class BaseProvider {
 
       // Debug: log the command being executed
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] ========== EXECUTING PROVIDER ==========`));
-        console.error(chalk.dim(`[VERBOSE] Provider: ${this.name}`));
-        console.error(chalk.dim(`[VERBOSE] Executable: ${executable}`));
-        console.error(chalk.dim(`[VERBOSE] Command args: ${cmdArgs.join(' ')}`));
-        console.error(chalk.dim(`[VERBOSE] Prompt length: ${fullPrompt.length} characters`));
-        console.error(chalk.dim(`[VERBOSE] ========== FULL PROMPT SENT ==========`));
-        console.error(chalk.dim(fullPrompt));
-        console.error(chalk.dim(`[VERBOSE] ========================================`));
+        this.showVerbose(`========== EXECUTING PROVIDER ==========`);
+        this.showVerbose(`Provider: ${this.name}`);
+        this.showVerbose(`Executable: ${executable}`);
+        this.showVerbose(`Command args: ${cmdArgs.join(' ')}`);
+        this.showVerbose(`Prompt length: ${fullPrompt.length} characters`);
+        this.showVerbose(`========== FULL PROMPT SENT ==========`);
+        this.showVerbose(fullPrompt);
+        this.showVerbose(`========================================`);
       }
 
       let child;
 
       if (process.platform === 'win32') {
-        // On Windows, use cmd.exe /c with array arguments
-        // When passing as array to spawn(), Node.js handles the quoting correctly
-        // We don't need to escape anything - just pass the raw prompt
+        // On Windows, we need shell: true to resolve PATH, but we use windowsHide to prevent popups
+        // The PID will be the shell's PID, but taskkill /T will kill the entire tree
         if (process.env.GALDR_VERBOSE) {
-          console.error(chalk.dim(`[VERBOSE] Executing via cmd.exe /c with array args`));
+          this.showVerbose(`Executing with shell and windowsHide`);
         }
 
-        // Build command: cmd.exe /c executable arg1 arg2 ...
-        // If using piped input, don't include the prompt in args
-        const args = ['/c', executable, ...cmdArgs];
-        child = spawn('cmd.exe', args, {
+        child = spawn(executable, cmdArgs, {
           stdio: ['pipe', 'pipe', 'pipe'],
-          shell: true, // Need shell: true to resolve executables in PATH
-          signal: signal,
+          shell: true,
+          windowsHide: true, // Prevent console window from appearing
         });
 
         // If using piped input, write the prompt to stdin and close it
@@ -214,7 +273,7 @@ export abstract class BaseProvider {
       } else {
         // On Unix, use array arguments - shell will handle quoting
         if (process.env.GALDR_VERBOSE) {
-          console.error(chalk.dim(`[VERBOSE] Executing with array args (Unix)`));
+          this.showVerbose(`Executing with array args (Unix)`);
         }
 
         // If using piped input, don't include the prompt in args
@@ -222,7 +281,7 @@ export abstract class BaseProvider {
         child = spawn(executable, args, {
           stdio: ['pipe', 'pipe', 'pipe'],
           shell: true,
-          signal: signal,
+          detached: true,
         });
 
         // If using piped input, write the prompt to stdin and close it
@@ -233,7 +292,7 @@ export abstract class BaseProvider {
       }
 
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] Spawn returned, PID: ${child.pid}`));
+        this.showVerbose(`Spawn returned, PID: ${child.pid}`);
       }
 
       this.handleChildProcess(child, onStream, resolve, signal);
