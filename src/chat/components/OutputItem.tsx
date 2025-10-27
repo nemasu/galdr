@@ -62,18 +62,34 @@ export const OutputItem: React.FC<OutputItemProps> = React.memo(({ message, isSt
       {/* Render stream items in order (text and tools interleaved) */}
       {hasStreamItems ? (
         <Box flexDirection="column">
-          {message.streamItems!.map((item, idx) => {
-            if (item.type === 'text' && item.text) {
-              return (
-                <Text key={`stream-${idx}`} color="white">
-                  {item.text}
-                </Text>
-              );
-            } else if (item.type === 'tool' && item.tool) {
-              return <ToolInfoDisplay key={`stream-${idx}`} tool={item.tool} />;
-            }
-            return null;
-          })}
+          {(() => {
+            const elements: React.ReactNode[] = [];
+            let textBuffer: string[] = [];
+            let textKey = 0;
+
+            const flushTextBuffer = () => {
+              if (textBuffer.length > 0) {
+                elements.push(
+                  <Text key={`text-${textKey++}`} color="white">
+                    {textBuffer.join('')}
+                  </Text>
+                );
+                textBuffer = [];
+              }
+            };
+
+            message.streamItems!.forEach((item, idx) => {
+              if (item.type === 'text' && item.text) {
+                textBuffer.push(item.text);
+              } else if (item.type === 'tool' && item.tool) {
+                flushTextBuffer();
+                elements.push(<ToolInfoDisplay key={`stream-${idx}`} tool={item.tool} />);
+              }
+            });
+
+            flushTextBuffer();
+            return elements;
+          })()}
         </Box>
       ) : (
         <>

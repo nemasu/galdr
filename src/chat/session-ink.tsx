@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { render, Box, Text, useApp, Static } from 'ink';
 import { Provider, SwitchMode, Message, ToolInfo, StreamItem } from '../types/index.js';
 import { ContextManager } from '../context/manager.js';
@@ -332,32 +332,38 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     // Get conversation history
     const conversationHistory = context.getMessages().slice(0, -1);
 
+    // Use a local variable to track streaming items to avoid stale closure issues
+    let accumulatedStreamItems: StreamItem[] = [];
+
     // Create InkWriter callbacks
     let currentToolId = 0;
     const writerCallbacks: InkWriterCallbacks = {
       onTextChunk: (chunk: string) => {
-        setStreamingItems((prev) => [...prev, { type: 'text', text: chunk }]);
+        const newItem = { type: 'text' as const, text: chunk };
+        accumulatedStreamItems = [...accumulatedStreamItems, newItem];
+        setStreamingItems(accumulatedStreamItems);
       },
       onToolUse: (name: string, parameters?: any) => {
         const toolId = `tool-${currentToolId++}`;
         const toolInfo: ToolInfo = { id: toolId, name, parameters, status: 'running' };
-        setStreamingItems((prev) => [...prev, { type: 'tool', tool: toolInfo }]);
+        const newItem = { type: 'tool' as const, tool: toolInfo };
+        accumulatedStreamItems = [...accumulatedStreamItems, newItem];
+        setStreamingItems(accumulatedStreamItems);
       },
       onToolComplete: (success: boolean) => {
-        setStreamingItems((prev) => {
-          const newItems = [...prev];
-          // Find the last tool item and update its status
-          for (let i = newItems.length - 1; i >= 0; i--) {
-            if (newItems[i].type === 'tool' && newItems[i].tool) {
-              newItems[i] = {
-                ...newItems[i],
-                tool: { ...newItems[i].tool!, status: success ? 'success' : 'failed' }
-              };
-              break;
-            }
+        const newItems = [...accumulatedStreamItems];
+        // Find the last tool item and update its status
+        for (let i = newItems.length - 1; i >= 0; i--) {
+          if (newItems[i].type === 'tool' && newItems[i].tool) {
+            newItems[i] = {
+              ...newItems[i],
+              tool: { ...newItems[i].tool!, status: success ? 'success' : 'failed' }
+            };
+            break;
           }
-          return newItems;
-        });
+        }
+        accumulatedStreamItems = newItems;
+        setStreamingItems(newItems);
       },
       onInfo: (message: string) => {
         setNotifications([{ type: 'info', message }]);
@@ -376,13 +382,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     setIsLoading(false);
 
     if (result.success && result.response) {
-      // Extract text and tools from streaming items
-      const textContent = streamingItems
+      // Extract text and tools from the accumulated items (not state) to avoid stale closure
+      const finalStreamItems = accumulatedStreamItems;
+      const textContent = finalStreamItems
         .filter(item => item.type === 'text')
         .map(item => item.text || '')
         .join('');
 
-      const tools = streamingItems
+      const tools = finalStreamItems
         .filter(item => item.type === 'tool')
         .map(item => item.tool!)
         .filter(tool => tool !== undefined);
@@ -394,7 +401,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
         timestamp: Date.now(),
         provider,
         tools: tools.length > 0 ? tools : undefined,
-        streamItems: streamingItems.length > 0 ? streamingItems : undefined,
+        streamItems: finalStreamItems.length > 0 ? finalStreamItems : undefined,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);

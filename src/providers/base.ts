@@ -39,7 +39,7 @@ export abstract class BaseProvider {
     return !hiddenTools.includes(toolName);
   }
 
-  private handleChildProcess(
+  protected handleChildProcess(
     child: ReturnType<typeof spawn>,
     onStream: ((chunk: string) => void) | undefined,
     resolve: (value: ProviderResult) => void,
@@ -73,7 +73,8 @@ export abstract class BaseProvider {
       const chunk = data.toString();
       stdout += chunk;
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] stdout: ${chunk}...`));
+        console.error(chalk.dim(`[VERBOSE] stdout chunk (${chunk.length} bytes):`));
+        console.error(chalk.dim(chunk));
       }
       if (onStream) {
         onStream(chunk);
@@ -85,7 +86,8 @@ export abstract class BaseProvider {
       const chunk = data.toString();
       stderr += chunk;
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] stderr: ${chunk}...`));
+        console.error(chalk.dim(`[VERBOSE] stderr chunk (${chunk.length} bytes):`));
+        console.error(chalk.dim(chunk));
       }
       if (process.env.DEBUG) {
         process.stderr.write(chunk);
@@ -94,9 +96,13 @@ export abstract class BaseProvider {
 
     child.on('close', (code) => {
       if (process.env.GALDR_VERBOSE) {
+        console.error(chalk.dim(`[VERBOSE] ========== PROVIDER RESPONSE COMPLETE ==========`));
         console.error(chalk.dim(`[VERBOSE] Process exited with code: ${code}`));
-        console.error(chalk.dim(`[VERBOSE] Full stdout:\n${stdout}\n`));
-        console.error(chalk.dim(`[VERBOSE] Full stderr:\n${stderr}\n`));
+        console.error(chalk.dim(`[VERBOSE] Full stdout (${stdout.length} bytes):`));
+        console.error(chalk.dim(stdout));
+        console.error(chalk.dim(`[VERBOSE] Full stderr (${stderr.length} bytes):`));
+        console.error(chalk.dim(stderr));
+        console.error(chalk.dim(`[VERBOSE] ===============================================`));
       }
       if (code !== 0) {
         const combinedOutput = stdout + stderr;
@@ -111,7 +117,7 @@ export abstract class BaseProvider {
       const combinedOutput = stdout + stderr;
       result.tokenLimitReached = this.detectTokenLimit(combinedOutput);
       if (process.env.GALDR_VERBOSE) {
-        console.error(chalk.dim(`[VERBOSE] Parsed response length: ${result.response?.length || 0}`));
+        console.error(chalk.dim(`[VERBOSE] Parsed response length: ${result.response?.length || 0} characters`));
         console.error(chalk.dim(`[VERBOSE] Token limit reached: ${result.tokenLimitReached}`));
       }
       resolve(result);
@@ -171,10 +177,14 @@ export abstract class BaseProvider {
 
       // Debug: log the command being executed
       if (process.env.GALDR_VERBOSE) {
+        console.error(chalk.dim(`[VERBOSE] ========== EXECUTING PROVIDER ==========`));
+        console.error(chalk.dim(`[VERBOSE] Provider: ${this.name}`));
         console.error(chalk.dim(`[VERBOSE] Executable: ${executable}`));
         console.error(chalk.dim(`[VERBOSE] Command args: ${cmdArgs.join(' ')}`));
-        console.error(chalk.dim(`[VERBOSE] Prompt length: ${fullPrompt.length}`));
-        console.error(chalk.dim(`[VERBOSE] Full prompt: ${fullPrompt}`));
+        console.error(chalk.dim(`[VERBOSE] Prompt length: ${fullPrompt.length} characters`));
+        console.error(chalk.dim(`[VERBOSE] ========== FULL PROMPT SENT ==========`));
+        console.error(chalk.dim(fullPrompt));
+        console.error(chalk.dim(`[VERBOSE] ========================================`));
       }
 
       let child;

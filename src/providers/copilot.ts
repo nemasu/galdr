@@ -32,6 +32,71 @@ export class CopilotProvider extends BaseProvider {
     };
   }
 
+  // Override to always display stdout in real-time (not just verbose mode)
+  protected handleChildProcess(
+    child: any,
+    onStream: ((chunk: string) => void) | undefined,
+    resolve: (value: ProviderResult) => void,
+    signal?: AbortSignal
+  ): void {
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout?.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      stdout += chunk;
+      if (process.env.GALDR_VERBOSE) {
+        console.error(chalk.dim(`[VERBOSE] copilot stdout chunk (${chunk.length} bytes):`));
+        console.error(chalk.dim(chunk));
+      }
+      if (onStream) {
+        onStream(chunk);
+      }
+      this.handleStreamChunk(chunk);
+    });
+
+    child.stderr?.on('data', (data: Buffer) => {
+      const chunk = data.toString();
+      stderr += chunk;
+      if (process.env.GALDR_VERBOSE) {
+        console.error(chalk.dim(`[VERBOSE] copilot stderr chunk (${chunk.length} bytes):`));
+        console.error(chalk.dim(chunk));
+      }
+      if (process.env.DEBUG) {
+        process.stderr.write(chunk);
+      }
+    });
+
+    child.on('close', (code: number) => {
+      if (process.env.GALDR_VERBOSE) {
+        console.error(chalk.dim(`[VERBOSE] ========== COPILOT RESPONSE COMPLETE ==========`));
+        console.error(chalk.dim(`[VERBOSE] Process exited with code: ${code}`));
+        console.error(chalk.dim(`[VERBOSE] Full stdout (${stdout.length} bytes):`));
+        console.error(chalk.dim(stdout));
+        console.error(chalk.dim(`[VERBOSE] Full stderr (${stderr.length} bytes):`));
+        console.error(chalk.dim(stderr));
+        console.error(chalk.dim(`[VERBOSE] ================================================`));
+      }
+      if (code !== 0) {
+        const combinedOutput = stdout + stderr;
+        resolve({
+          success: false,
+          error: stderr || `Command exited with code ${code}`,
+          response: combinedOutput,
+        });
+      } else {
+        const parsed = this.parseOutput(stdout);
+        resolve(parsed);
+      }
+    });
+
+    if (signal) {
+      signal.addEventListener('abort', () => {
+        child.kill();
+      });
+    }
+  }
+
   // Override to handle streaming display
   protected handleStreamChunk(chunk: string): void {
     const lines = chunk.split('\n');
@@ -78,13 +143,17 @@ export class CopilotProvider extends BaseProvider {
         this.firstChunkReceived = true;
       }
 
-      // Output line with newline, unless it's the last incomplete line
+      // Output the text exactly as received
+      // Only add newline if this isn't the last line (which means there was a \n after it in the chunk)
       if (this.inkWriter) {
         if (!isLastLine) {
+          // There was a newline after this line in the chunk, so preserve it
           this.inkWriter.writeText(line + '\n');
         } else if (line) {
+          // Last line with content - output as-is without adding newline
           this.inkWriter.writeText(line);
         }
+        // If it's the last line and it's empty, skip it (it was just trailing data after a \n)
       }
     }
   }
