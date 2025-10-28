@@ -15,6 +15,8 @@ export const ProviderBadge: React.FC<ProviderBadgeProps> = ({ provider }) => {
         return { bg: 'blue', label: 'GEMINI' };
       case 'copilot':
         return { bg: 'cyan', label: 'COPILOT' };
+      case 'deepseek':
+        return { bg: 'yellow', label: 'DEEPSEEK' };
       case 'cursor':
         return { bg: 'magenta', label: 'CURSOR' };
     }
@@ -37,6 +39,8 @@ export const getProviderColor = (provider: Provider): string => {
       return 'blue';
     case 'copilot':
       return 'cyan';
+    case 'deepseek':
+      return 'yellow';
     case 'cursor':
       return 'magenta';
   }

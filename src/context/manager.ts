@@ -62,12 +62,14 @@ export class ContextManager {
         claude: 0,
         gemini: 0,
         copilot: 0,
+        deepseek: 0,
         cursor: 0,
       },
       providerModels: {
         claude: 'default',
         gemini: 'default',
         copilot: 'default',
+        deepseek: 'default',
         cursor: 'default',
       },
     };
@@ -119,12 +121,32 @@ export class ContextManager {
   }
 
   public incrementProviderUsage(provider: Provider): void {
+    // Ensure providerUsage exists and has the provider key (for backward compatibility)
+    if (!this.context.providerUsage) {
+      this.context.providerUsage = {
+        claude: 0,
+        gemini: 0,
+        copilot: 0,
+        deepseek: 0,
+        cursor: 0,
+      };
+    }
+    if (this.context.providerUsage[provider] === undefined) {
+      this.context.providerUsage[provider] = 0;
+    }
     this.context.providerUsage[provider]++;
     this.save();
   }
 
-  public getProviderUsage(): { claude: number; gemini: number; copilot: number; cursor: number } {
-    return this.context.providerUsage;
+  public getProviderUsage(): { claude: number; gemini: number; copilot: number; deepseek: number; cursor: number } {
+    // Ensure all providers have usage counts (for backward compatibility with old sessions)
+    return {
+      claude: this.context.providerUsage.claude ?? 0,
+      gemini: this.context.providerUsage.gemini ?? 0,
+      copilot: this.context.providerUsage.copilot ?? 0,
+      deepseek: this.context.providerUsage.deepseek ?? 0,
+      cursor: this.context.providerUsage.cursor ?? 0,
+    };
   }
 
   public clear(): void {
@@ -133,6 +155,7 @@ export class ContextManager {
       claude: 0,
       gemini: 0,
       copilot: 0,
+      deepseek: 0,
       cursor: 0,
     };
     this.save();
@@ -212,6 +235,7 @@ export class ContextManager {
         claude: 'default',
         gemini: 'default',
         copilot: 'default',
+        deepseek: 'default',
         cursor: 'default',
       };
     }
@@ -225,6 +249,7 @@ export class ContextManager {
         claude: 'default',
         gemini: 'default',
         copilot: 'default',
+        deepseek: 'default',
         cursor: 'default',
       };
       this.save();

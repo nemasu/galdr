@@ -1,94 +1,78 @@
 # Galdr
 
-CLI tool that combines multiple AI coding assistants (Claude, Gemini, Copilot, Cursor) with automatic provider switching and persistent context.
+A CLI tool that integrates multiple AI coding assistants (Claude, Gemini, Copilot, DeepSeek API, Cursor) with provider switching and persistent context management.
 
-**Note: This tool is not stable yet. Expect bugs & breaking changes.**
+**Note: This tool is currently in development. Expect bugs and breaking changes.**
 
 ## Features
 
-- **Interactive Chat**: Full-screen terminal interface with colored provider badges and streaming responses
-- **Automatic Provider Switching**: Switches between AI providers when token limits are reached
-- **Persistent Context**: Conversation history stored in `.galdr` folder
-  - Restored on startup with message count notification
-  - Full conversation history sent to providers
-- **History Management**:
-  - Auto-compact at 50 messages (keeps 20 most recent, summarizes older ones using available LLM)
-  - Manual compact with `/compact [N]` - creates AI-generated summary of removed messages
-  - Requires at least one LLM to be available (claude, gemini, copilot, or cursor) - will error if none available
-  - Statistics via `/history` command
-- **Switch Modes**:
-  - **Rollover**: Switch to next provider when token limit reached
-  - **Manual**: User chooses provider
-  - **Round-robin**: Cycle through providers for each request
-  - Change modes in-chat with `/mode <mode>`
-- **Usage Tracking**: Per-provider request counts
-- **No Configuration Required**: Uses existing CLI tools (claude, gemini, copilot, cursor)
+- **Multi-Provider Integration**: Single interface for Claude, Gemini, Copilot, DeepSeek, and Cursor
+- **Provider Switching**: Automatic switching between providers when token limits are reached
+- **Switching Modes**: Rollover, manual, and round-robin provider selection strategies
+- **Context Persistence**: Complete conversation history stored and restored between sessions
+- **Context Compaction**: Automatic summarization of long conversations to manage token limits
+- **Session Management**: Save, load, and manage multiple conversation sessions
+- **DeepSeek Tool Integration**: Built-in support for file operations (read, write, list, find, edit)
+- **Existing Tool Integration**: Leverages installed AI CLI tools without additional configuration
 
-## Prerequisites
+## Installation
 
-Install at least one of the following AI CLI tools:
+### Prerequisites
+
+Install at least one of these AI CLI tools:
 
 - [Claude CLI](https://claude.com/claude-code)
 - [Gemini CLI](https://github.com/google/generative-ai-cli)
 - [GitHub Copilot CLI](https://githubnext.com/projects/copilot-cli)
-- [Cursor CLI](https://www.cursor.com) Note: Very basic support
+- [Cursor CLI](https://www.cursor.com) *(basic support)*
+- [DeepSeek API](https://platform.deepseek.com) *(requires API key)*
 
-## Installation
+### Setup
 
 ```bash
+# Clone and install
 npm install
 npm run build
 
-# Optionally link globally
+# Optional: Install globally
 npm link
 ```
 
 ## Usage
 
-### Interactive Chat Mode
+### Basic Commands
 
 ```bash
-# Start interactive chat (default command)
+# Start interactive chat
 galdr
 
-# Or explicitly use the chat command
-galdr chat
-
-# Start with initial prompt
+# Chat with initial prompt
 galdr "explain how async/await works in JavaScript"
 
 # Use specific provider
 galdr --provider gemini
 ```
 
-Available commands:
+#### Chat Commands
 
-- `/exit` or `/quit` - Exit chat
-- `/switch <provider>` - Switch provider (claude, gemini, copilot, cursor)
-- `/mode <mode>` - Change switch mode (manual, rollover, round-robin)
-- `/model <provider> <model>` - Set model for a provider (e.g., `/model copilot claude-sonnet-4.5`)
-- `/clear` - Clear history and screen
-- `/compact [keep]` - Compact history, keep N recent messages (default: 10)
-- `/history` - Show statistics (message count, size, age, auto-compact status)
-- `/status` - Show provider availability and usage
-- `/verbose` - Toggle verbose output mode
-- `/help` - Show commands
-- `/sessions` - List all saved sessions
-- `/session-new <name> [description]` - Create a new session
-- `/session-load <name>` - Switch to an existing session
-- `/session-save [description]` - Save the current session
-- `/session-delete <name>` - Delete a session
-- `/session-rename <old-name> <new-name>` - Rename a session
-
-Chat interface:
-- Full-screen UI adapts to terminal size
-- Provider badges indicate active AI
-- Streaming responses
-- Automatic provider fallback on token limits
-- Conversation history restored on startup
-- Full conversation context sent to providers
-- Notifications for provider switches and auto-compaction
-- Auto-compact at 50 messages
+| Command | Description |
+|---------|-------------|
+| `/exit`, `/quit` | Exit the chat |
+| `/switch <provider>` | Switch to specific provider |
+| `/mode <mode>` | Change switching mode |
+| `/model <provider> <model>` | Set model for provider |
+| `/clear` | Clear history and screen |
+| `/compact [keep]` | Compact history, keep N recent messages |
+| `/history` | Show conversation statistics |
+| `/status` | Show provider availability |
+| `/verbose` | Toggle verbose output |
+| `/help` | Show all commands |
+| `/sessions` | List saved sessions |
+| `/session-new <name> [desc]` | Create new session |
+| `/session-load <name>` | Load existing session |
+| `/session-save [desc]` | Save current session |
+| `/session-delete <name>` | Delete session |
+| `/session-rename <old> <new>` | Rename session |
 
 ### Context Management
 
@@ -103,53 +87,68 @@ galdr context --clear
 galdr context --compact 10
 ```
 
-### Status
+### Provider Status
 
 ```bash
-# Check provider availability and usage stats
+# Check provider availability and usage
 galdr status
 ```
 
-## How It Works
+## Configuration
 
-1. **Context Persistence**: Conversations saved in `.galdr/context.json`
-   - Messages saved after each exchange
-   - Context restored on startup
-   - Full conversation history sent to providers
+### Switching Modes
 
-2. **Provider Wrapping**: Spawns CLI tools (claude, gemini, copilot, cursor) as child processes
+Galdr supports three provider switching strategies:
 
-3. **Provider Switching**: Detects token limit errors and switches based on configured mode
+- **Manual** (Default): User manually chooses provider for each request
+- **Rollover**: Automatically switches to next provider when token limits are reached
+- **Round-robin**: Cycles through providers for each request
 
-4. **Auto-compact**: Triggered when message count exceeds 50
-   - Keeps 20 most recent messages
-   - Summarizes older messages using first available LLM (claude > gemini > copilot > cursor)
-   - If no LLM is available, returns an error and history is not modified
-   - Manual compact: `/compact [N]` - keeps N recent messages, summarizes the rest
+Change modes in-chat with `/mode <mode>`
 
+### Auto-Compaction
+
+When conversation history exceeds 50 messages, Galdr automatically:
+- Keeps the 20 most recent messages
+- Summarizes older messages using available LLMs
+- Maintains conversation context while staying within token limits
+
+Manual compaction: `/compact [N]` - keeps N recent messages, summarizes the rest
+
+### Session Management
+
+Organize conversations into sessions:
+- Create, save, and load multiple conversation contexts
+- Store sessions for different projects or topics
+- Persistent storage in `.galdr/sessions/`
+
+### Data Storage
+
+- **Sessions**: `.galdr/sessions/` directory
+- **Configuration**: `~/.galdr/config.json` (for defaults and DeepSeek API key)
 
 ## Development
+
+### Building from Source
 
 ```bash
 # Install dependencies
 npm install
 
-# Build
+# Build the project
 npm run build
 
-# Watch mode
-npm run dev
-
 # Run locally
-npm start chat "your prompt here"
+npm start
 ```
 
-## Future Enhancements
+### Planned Enhancements
+
 - Improve token limit detection
-- Better tool messages
-- Multi-provider comparison mode (send same prompt to all providers simultaneously)?
-- Search within conversation history
+- Improve session management (todo list-like?)
+- Context usage indicator
+- Multi-provider comparison mode?
 
 ## License
 
-MIT
+MIT License

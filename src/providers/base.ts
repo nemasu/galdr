@@ -34,9 +34,9 @@ export abstract class BaseProvider {
   }
 
   // Helper method to determine if a tool should be displayed
-  // Tools like "Read" produce verbose output, so we hide them
+  // Currently no tools are hidden - all tool usage is shown to users
   protected shouldDisplayTool(toolName: string): boolean {
-    const hiddenTools = ['Read'];
+    const hiddenTools: string[] = [];
     return !hiddenTools.includes(toolName);
   }
 

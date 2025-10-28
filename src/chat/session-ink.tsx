@@ -11,7 +11,6 @@ import { KeypressProvider, useKeypress, Key } from './contexts/KeypressContext.j
 import { TextBuffer } from './utils/TextBuffer.js';
 import { InputArea } from './components/InputArea.js';
 import { InkWriter, InkWriterCallbacks } from './utils/InkWriter.js';
-import { findLastSafeSplitPoint, getAccumulatedText, estimateLineCount } from './utils/messageSplitting.js';
 
 interface Notification {
   type: 'info' | 'error' | 'success' | 'provider-switch';
@@ -20,13 +19,13 @@ interface Notification {
   to?: Provider;
 }
 
-interface ChatAppProps {
+interface GaldrAppProps {
   context: ContextManager;
   providerManager: ProviderManager;
   initialPrompt?: string;
 }
 
-const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialPrompt }) => {
+const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPrompt }) => {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [currentProvider, setCurrentProvider] = useState<Provider>(context.getCurrentProvider());
@@ -37,11 +36,14 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
   const [showWelcome, setShowWelcome] = useState(true);
   const [abortController, setAbortController] = useState(new AbortController());
   const [ctrlCCount, setCtrlCCount] = useState(0);
-  const [streamingItems, setStreamingItems] = useState<StreamItem[]>([]);
+
+  // Pending item pattern: single mutable message for streaming
+  const [pendingMessage, setPendingMessage] = useState<Message | null>(null);
 
   const buffer = useMemo(() => new TextBuffer(), []);
   const initialMessageCount = useMemo(() => messages.length, []);
   const [initialPromptProcessed, setInitialPromptProcessed] = useState(false);
+  const [bufferUpdateTrigger, setBufferUpdateTrigger] = useState(0);
 
   // Memoize switch mode to prevent unnecessary re-renders
   const switchMode = useMemo(() => context.getSwitchMode(), [context]);
@@ -75,13 +77,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     }
   }, [initialPrompt, initialPromptProcessed, isLoading]);
 
-  // Hide welcome screen once messages start appearing or when streaming starts
-  useEffect(() => {
-    if (messages.length > initialMessageCount || streamingItems.length > 0) {
-      setShowWelcome(false);
-    }
-  }, [messages, initialMessageCount, streamingItems]);
-
   // Reset Ctrl+C count after 1 second
   useEffect(() => {
     if (ctrlCCount > 0) {
@@ -90,13 +85,27 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     }
   }, [ctrlCCount]);
 
-  // Exit on double Ctrl+C
+  // Handle Ctrl+C behavior
   useEffect(() => {
-    if (ctrlCCount >= 2) {
+    if (ctrlCCount === 0) return;
+
+    if (ctrlCCount === 1) {
+      // Single Ctrl+C: Clear input buffer or show exit prompt
+      if (!isLoading) {
+        buffer.clear();
+        setBufferUpdateTrigger(prev => prev + 1); // Force InputArea re-render
+        setNotifications([{ type: 'info', message: 'Input cleared. Press Ctrl+C again to exit' }]);
+      } else {
+        // During loading, show exit prompt
+        setNotifications([{ type: 'info', message: 'Press Ctrl+C again to exit' }]);
+      }
+    } else if (ctrlCCount >= 2) {
+      // Double Ctrl+C: Exit program
       if (isLoading) {
         setNotifications([{ type: 'info', message: 'Cancelling current operation...' }]);
         abortController.abort();
         setIsLoading(false);
+        setPendingMessage(null);
         setAbortController(new AbortController());
         setCtrlCCount(0);
       } else {
@@ -104,9 +113,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
         setTimeout(() => exit(), 500);
       }
     }
-  }, [ctrlCCount, isLoading, abortController, exit]);
+  }, [ctrlCCount, isLoading, abortController, exit, buffer]);
 
-  // Global keypress handler for Ctrl+C and Escape
+  const [isActive, setIsActive] = useState(true);
+
+  // Global keypress handler for Ctrl+C, Escape, and Ctrl+S
   const handleGlobalKeypress = (key: Key) => {
     // Handle Ctrl+C
     if (key.ctrl && key.name === 'c') {
@@ -120,6 +131,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
         setNotifications([{ type: 'info', message: 'Cancelling current operation...' }]);
         abortController.abort();
         setIsLoading(false);
+        setPendingMessage(null);
         setAbortController(new AbortController());
       }
       return;
@@ -145,7 +157,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
       case 'switch':
         if (args.length === 0) {
           setNotifications([
-            { type: 'error', message: 'Usage: /switch <provider> (claude, gemini, copilot, or cursor)' },
+            { type: 'error', message: 'Usage: /switch <provider> (claude, gemini, copilot, deepseek, or cursor)' },
           ]);
           return;
         }
@@ -224,15 +236,18 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
   };
 
   const handleSwitchProvider = async (provider: Provider) => {
-    if (!['claude', 'gemini', 'copilot', 'cursor'].includes(provider)) {
-      setNotifications([{ type: 'error', message: 'Invalid provider. Must be: claude, gemini, copilot, or cursor' }]);
+    if (!['claude', 'gemini', 'copilot', 'deepseek', 'cursor'].includes(provider)) {
+      setNotifications([{ type: 'error', message: 'Invalid provider. Must be: claude, gemini, copilot, deepseek, or cursor' }]);
       return;
     }
 
     const available = await providerManager.checkAvailability(provider);
     if (!available) {
+      const errorMessage = provider === 'deepseek'
+        ? `Provider ${provider} is not available. Please set the API key using: galdr config --set-key deepseek <your-api-key>`
+        : `Provider ${provider} is not available. Please install the CLI tool.`;
       setNotifications([
-        { type: 'error', message: `Provider ${provider} is not available. Please install the CLI tool.` },
+        { type: 'error', message: errorMessage },
       ]);
       return;
     }
@@ -298,11 +313,18 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     const usage = context.getProviderUsage();
 
     const statusLines: string[] = [];
-    const providers: Provider[] = ['claude', 'gemini', 'copilot', 'cursor'];
+    const providers: Provider[] = ['claude', 'gemini', 'copilot', 'deepseek', 'cursor'];
 
     for (const provider of providers) {
       const available = availability.get(provider) || false;
-      const status = available ? '✓ Available' : '✗ Not found';
+      let status: string;
+
+      if (provider === 'deepseek') {
+        status = available ? '✓ Built-in (API key set)' : '⚠ Built-in (API key not set)';
+      } else {
+        status = available ? '✓ Available' : '✗ Not found';
+      }
+
       const model = context.getProviderModel(provider);
       statusLines.push(`${provider}: ${status} (${usage[provider]} requests, model: ${model})`);
     }
@@ -334,8 +356,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     const provider = args[0] as Provider;
     const model = args[1];
 
-    if (!['claude', 'gemini', 'copilot', 'cursor'].includes(provider)) {
-      setNotifications([{ type: 'error', message: 'Invalid provider. Must be: claude, gemini, copilot, or cursor' }]);
+    if (!['claude', 'gemini', 'copilot', 'deepseek', 'cursor'].includes(provider)) {
+      setNotifications([{ type: 'error', message: 'Invalid provider. Must be: claude, gemini, copilot, deepseek, or cursor' }]);
       return;
     }
 
@@ -467,7 +489,6 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
 
   const handleUserInput = async (userInput: string) => {
     setNotifications([]);
-    setStreamingItems([]);
 
     // Add user message
     const userMessage: Message = {
@@ -495,151 +516,79 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
 
   const executeWithProvider = async (prompt: string, provider: Provider) => {
     setIsLoading(true);
-    setStreamingItems([]);
-    setNotifications([]); // Clear any notifications before streaming starts
+    setPendingMessage(null);
+    // Don't clear notifications here - let them persist during streaming
 
     // Get conversation history
     const conversationHistory = context.getMessages().slice(0, -1);
 
-    // Get terminal dimensions
-    const terminalHeight = stdout?.rows || 24;
-    const terminalWidth = stdout?.columns || 80;
-    const RESERVED_LINES = 8; // Input area + padding + notifications
+    // Initialize pending message
+    const initialPendingMessage: Message = {
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      provider,
+      streamItems: [],
+    };
+    setPendingMessage(initialPendingMessage);
 
-    // Use a local variable to track streaming items to avoid stale closure issues
+    // Use local variables to track streaming state
     let accumulatedStreamItems: StreamItem[] = [];
-    let updateTimeoutId: NodeJS.Timeout | null = null;
-    let pendingUpdate = false;
+    let currentTextBuffer = ''; // Buffer for current text segment
+    let lastUpdate = Date.now();
+    const THROTTLE_MS = 16; // ~60fps
 
-    // Throttled update function to batch re-renders
-    const scheduleUpdate = () => {
-      if (pendingUpdate) return;
-      pendingUpdate = true;
-
-      if (updateTimeoutId) {
-        clearTimeout(updateTimeoutId);
-      }
-
-      updateTimeoutId = setTimeout(() => {
-        setStreamingItems([...accumulatedStreamItems]);
-        pendingUpdate = false;
-        updateTimeoutId = null;
-      }, 16); // ~60fps
+    // Helper to get full text content from all text items
+    const getFullTextContent = () => {
+      return accumulatedStreamItems
+        .filter(item => item.type === 'text')
+        .map(item => item.text || '')
+        .join('');
     };
 
-    // Helper to split and move completed portion to messages
-    const splitAndMoveToMessages = () => {
-      const accumulatedText = getAccumulatedText(accumulatedStreamItems);
-      const splitPoint = findLastSafeSplitPoint(accumulatedText);
+    // Helper to update pending message (throttled)
+    const updatePendingMessage = () => {
+      const now = Date.now();
+      if (now - lastUpdate < THROTTLE_MS) return;
+      lastUpdate = now;
 
-      // Only split if we found a valid split point (not at the end)
-      if (splitPoint >= accumulatedText.length || splitPoint === 0) {
-        return; // No valid split point
-      }
-
-      //setNotifications([{ type: 'info', message: `[DEBUG] Splitting message at position ${splitPoint}` }]);
-
-      // Find which items and where to split
-      let charCount = 0;
-      let splitItemIndex = -1;
-      let splitWithinItemAt = -1;
-
-      for (let i = 0; i < accumulatedStreamItems.length; i++) {
-        const item = accumulatedStreamItems[i];
-        if (item.type === 'text' && item.text) {
-          const itemLength = item.text.length;
-          if (charCount + itemLength >= splitPoint) {
-            // Split point is within this item
-            splitItemIndex = i;
-            splitWithinItemAt = splitPoint - charCount;
-            break;
-          }
-          charCount += itemLength;
-        }
-      }
-
-      if (splitItemIndex === -1) return; // Shouldn't happen, but safety check
-
-      // Create items for completed message
-      const completedItems: StreamItem[] = [];
-      for (let i = 0; i < splitItemIndex; i++) {
-        completedItems.push(accumulatedStreamItems[i]);
-      }
-
-      // Split the text item at splitItemIndex
-      const splitItem = accumulatedStreamItems[splitItemIndex];
-      if (splitItem.type === 'text' && splitItem.text) {
-        const beforeText = splitItem.text.substring(0, splitWithinItemAt);
-        const afterText = splitItem.text.substring(splitWithinItemAt);
-
-        if (beforeText) {
-          completedItems.push({ type: 'text' as const, text: beforeText });
-        }
-
-        // Keep remaining items (including afterText and everything after)
-        const remainingItems: StreamItem[] = [];
-        if (afterText) {
-          remainingItems.push({ type: 'text' as const, text: afterText });
-        }
-        for (let i = splitItemIndex + 1; i < accumulatedStreamItems.length; i++) {
-          remainingItems.push(accumulatedStreamItems[i]);
-        }
-
-        // Create completed message and add to messages
-        if (completedItems.length > 0) {
-          const completedText = completedItems
-            .filter(item => item.type === 'text')
-            .map(item => item.text || '')
-            .join('');
-
-          const completedTools = completedItems
-            .filter(item => item.type === 'tool')
-            .map(item => item.tool!)
-            .filter(tool => tool !== undefined);
-
-          const completedMessage: Message = {
-            role: 'assistant',
-            content: completedText,
-            timestamp: Date.now(),
-            provider,
-            tools: completedTools.length > 0 ? completedTools : undefined,
-            streamItems: completedItems,
-          };
-
-          // Add to messages (will render in Static component)
-          setMessages((prev) => [...prev, completedMessage]);
-
-          // Keep only remaining items for continued streaming
-          accumulatedStreamItems = remainingItems;
-        }
-      }
+      setPendingMessage({
+        role: 'assistant',
+        content: getFullTextContent(),
+        timestamp: Date.now(),
+        provider,
+        streamItems: [...accumulatedStreamItems],
+      });
     };
 
     // Create InkWriter callbacks
     let currentToolId = 0;
     const writerCallbacks: InkWriterCallbacks = {
       onTextChunk: (chunk: string) => {
-        // Accumulate text into the last item if it's also text
+        currentTextBuffer += chunk;
+
+        // Update or create text item in stream
         const lastItem = accumulatedStreamItems[accumulatedStreamItems.length - 1];
         if (lastItem && lastItem.type === 'text') {
-          lastItem.text = (lastItem.text || '') + chunk;
+          // Update existing text item
+          lastItem.text = currentTextBuffer;
         } else {
-          accumulatedStreamItems.push({ type: 'text' as const, text: chunk });
+          // Create new text item
+          accumulatedStreamItems.push({ type: 'text' as const, text: currentTextBuffer });
         }
 
-        // Proactively split whenever we have a safe split point
-        // This follows Gemini CLI's approach: maximize content in Static region
-        // to minimize re-renders and prevent flickering
-        splitAndMoveToMessages();
-
-        scheduleUpdate();
+        updatePendingMessage();
       },
       onToolUse: (name: string, parameters?: any) => {
+        // Start a new text buffer for text after this tool
+        currentTextBuffer = '';
+
         const toolId = `tool-${currentToolId++}`;
         const toolInfo: ToolInfo = { id: toolId, name, parameters, status: 'running' };
         const newItem = { type: 'tool' as const, tool: toolInfo };
         accumulatedStreamItems.push(newItem);
-        scheduleUpdate();
+
+        updatePendingMessage();
       },
       onToolComplete: (success: boolean) => {
         // Find the last tool item and update its status
@@ -652,12 +601,17 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
             break;
           }
         }
-        scheduleUpdate();
+
+        updatePendingMessage();
       },
       onInfo: (message: string) => {
+        // Start a new text buffer for text after this info
+        currentTextBuffer = '';
+
         const newItem = { type: 'info' as const, info: message };
         accumulatedStreamItems.push(newItem);
-        scheduleUpdate();
+
+        updatePendingMessage();
       },
     };
 
@@ -675,41 +629,41 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
 
     inkWriter.deactivate();
 
-    // Clear any pending timeout and do final update
-    if (updateTimeoutId) {
-      clearTimeout(updateTimeoutId);
-      updateTimeoutId = null;
-    }
-    setStreamingItems([...accumulatedStreamItems]);
+    // Get final text content from all text items
+    const finalTextContent = getFullTextContent();
+
+    // Final update with complete content
+    const finalPendingMessage: Message = {
+      role: 'assistant',
+      content: finalTextContent,
+      timestamp: Date.now(),
+      provider,
+      streamItems: [...accumulatedStreamItems],
+    };
+    setPendingMessage(finalPendingMessage);
 
     setIsLoading(false);
 
     if (result.success && result.response) {
-      // Extract text and tools from the accumulated items (not state) to avoid stale closure
-      const finalStreamItems = accumulatedStreamItems;
-      const textContent = finalStreamItems
-        .filter(item => item.type === 'text')
-        .map(item => item.text || '')
-        .join('');
-
-      const tools = finalStreamItems
+      // Extract tools from stream items
+      const tools = accumulatedStreamItems
         .filter(item => item.type === 'tool')
         .map(item => item.tool!)
         .filter(tool => tool !== undefined);
 
-      // Add assistant response with tools
-      const assistantMessage: Message = {
+      // Move pending message to completed history
+      const completedMessage: Message = {
         role: 'assistant',
-        content: textContent || result.response,
+        content: finalTextContent || result.response,
         timestamp: Date.now(),
         provider,
         tools: tools.length > 0 ? tools : undefined,
-        streamItems: finalStreamItems.length > 0 ? finalStreamItems : undefined,
+        streamItems: accumulatedStreamItems.length > 0 ? accumulatedStreamItems : undefined,
       };
 
-      setMessages((prev) => [...prev, assistantMessage]);
-      setStreamingItems([]);
-      setNotifications([]); // Clear any notifications from streaming
+      // Add to history and clear pending message
+      setMessages((prev) => [...prev, completedMessage]);
+      setPendingMessage(null);
 
       // Save assistant response to context
       const assistantResult = await context.addMessage('assistant', result.response, provider);
@@ -743,8 +697,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
         }
       }
     } else {
-      setNotifications([{ type: 'error', message: result.error || 'Unknown error occurred' }]);
-      setStreamingItems([]);
+      // On error, keep pending message visible with error notification
+      setNotifications((prev) => [...prev, { type: 'error', message: result.error || 'Unknown error occurred' }]);
 
       if (result.tokenLimitReached) {
         await handleTokenLimitReached(provider);
@@ -787,25 +741,31 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
   return (
     <Box flexDirection="column">
       {/* Main output area - displays all messages, tools, and notifications */}
-      <ContentArea
-        showWelcome={showWelcome}
-        currentProvider={currentProvider}
-        switchMode={switchMode}
-        initialMessageCount={initialMessageCount}
-        historyItems={historyItems}
-        notifications={notifications}
-        streamingItems={streamingItems}
-      />
+      <Box flexGrow={1} flexShrink={1} flexDirection="column" overflow="hidden">
+        <ContentArea
+          showWelcome={showWelcome}
+          currentProvider={currentProvider}
+          switchMode={switchMode}
+          initialMessageCount={initialMessageCount}
+          historyItems={historyItems}
+          notifications={notifications}
+          pendingMessage={pendingMessage}
+          isLoading={isLoading}
+        />
+      </Box>
 
-      {/* Input area - includes provider badge and text input */}
-      <InputArea
-        buffer={buffer}
-        onSubmit={handleSubmit}
-        isActive={!isLoading}
-        provider={currentProvider}
-        isLoading={isLoading}
-        sessionName={currentSession}
-      />
+      {/* Input area - includes provider badge and text input - pinned to bottom */}
+      <Box flexShrink={0} width="100%">
+        <InputArea
+          key={bufferUpdateTrigger}
+          buffer={buffer}
+          onSubmit={handleSubmit}
+          isActive={isActive && !isLoading}
+          provider={currentProvider}
+          isLoading={isLoading}
+          sessionName={currentSession}
+        />
+      </Box>
     </Box>
   );
 };
@@ -835,13 +795,11 @@ export class ChatSessionInk {
     }
 
     // Render the Ink app with KeypressProvider
-    const { waitUntilExit } = render(
+    const { unmount, waitUntilExit } = render(
       <KeypressProvider>
-        <ChatApp context={this.context} providerManager={this.providerManager} initialPrompt={initialPrompt} />
+        <GaldrApp context={this.context} providerManager={this.providerManager} initialPrompt={initialPrompt} />
       </KeypressProvider>,
-      {
-        exitOnCtrlC: false, // We handle Ctrl+C manually
-      }
+      { exitOnCtrlC: false }
     );
 
     await waitUntilExit();

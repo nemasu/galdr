@@ -3,6 +3,7 @@ import { BaseProvider } from './base.js';
 import { ClaudeProvider } from './claude.js';
 import { GeminiProvider } from './gemini.js';
 import { CopilotProvider } from './copilot.js';
+import { DeepSeekProvider } from './deepseek.js';
 import { CursorProvider } from './cursor.js';
 
 export class ProviderManager {
@@ -13,6 +14,7 @@ export class ProviderManager {
       ['claude', new ClaudeProvider()],
       ['gemini', new GeminiProvider()],
       ['copilot', new CopilotProvider()],
+      ['deepseek', new DeepSeekProvider()],
       ['cursor', new CursorProvider()],
     ]);
   }
@@ -41,26 +43,26 @@ export class ProviderManager {
   }
 
   public getNextProvider(current: Provider, mode: 'round-robin'): Provider {
-    const providers: Provider[] = ['claude', 'gemini', 'copilot', 'cursor'];
+    const providers: Provider[] = ['claude', 'gemini', 'copilot', 'deepseek', 'cursor'];
     const currentIndex = providers.indexOf(current);
     const nextIndex = (currentIndex + 1) % providers.length;
     return providers[nextIndex];
   }
 
   public async getNextAvailableProvider(current: Provider, mode: 'round-robin'): Promise<Provider | null> {
-    const providers: Provider[] = ['claude', 'gemini', 'copilot', 'cursor'];
+    const providers: Provider[] = ['claude', 'gemini', 'copilot', 'deepseek', 'cursor'];
     const currentIndex = providers.indexOf(current);
-    
+
     for (let i = 1; i < providers.length; i++) {
       const nextIndex = (currentIndex + i) % providers.length;
       const nextProvider = providers[nextIndex];
       const available = await this.checkAvailability(nextProvider);
-      
+
       if (available) {
         return nextProvider;
       }
     }
-    
+
     return null;
   }
 }
@@ -69,4 +71,5 @@ export { BaseProvider } from './base.js';
 export { ClaudeProvider } from './claude.js';
 export { GeminiProvider } from './gemini.js';
 export { CopilotProvider } from './copilot.js';
+export { DeepSeekProvider } from './deepseek.js';
 export { CursorProvider } from './cursor.js';

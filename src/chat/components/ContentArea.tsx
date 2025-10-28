@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Box, Text, Static } from 'ink';
-import { Provider, ToolInfo, Message, StreamItem } from '../../types/index.js';
+import { Provider, Message, StreamItem } from '../../types/index.js';
 import { OutputItem } from './OutputItem.js';
 import { WelcomeScreen } from './WelcomeScreen.js';
 import { ProviderBadge } from './ProviderBadge.js';
+import { OverflowProvider } from '../contexts/OverflowContext.js';
 
 interface Notification {
   type: 'info' | 'error' | 'success' | 'provider-switch';
@@ -19,7 +20,8 @@ interface ContentAreaProps {
   initialMessageCount: number;
   historyItems: React.ReactElement[];
   notifications: Notification[];
-  streamingItems?: StreamItem[];
+  pendingMessage?: Message | null;
+  isLoading: boolean;
 }
 
 export const ContentArea: React.FC<ContentAreaProps> = React.memo(({
@@ -29,73 +31,84 @@ export const ContentArea: React.FC<ContentAreaProps> = React.memo(({
   initialMessageCount,
   historyItems,
   notifications,
-  streamingItems = [],
+  pendingMessage = null,
+  isLoading,
 }) => {
+  // Static content: Welcome screen + completed messages
+  const staticItems = useMemo(() => {
+    const items: React.ReactElement[] = [];
+    if (showWelcome) {
+      items.push(
+        <WelcomeScreen
+          key="welcome"
+          provider={currentProvider}
+          switchMode={switchMode}
+          messageCount={initialMessageCount}
+        />
+      );
+    }
+    items.push(...historyItems);
+    return items;
+  }, [showWelcome, currentProvider, switchMode, initialMessageCount, historyItems]);
+
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {showWelcome && (
-        <WelcomeScreen provider={currentProvider} switchMode={switchMode} messageCount={initialMessageCount} />
-      )}
+      {/* Static content: completed messages (never re-renders) */}
+      <Static items={staticItems}>
+        {(item) => item}
+      </Static>
 
-      {/* Display completed messages using Static (immutable) */}
-      {historyItems.length > 0 && (
-        <Static key="history-static" items={historyItems}>
-          {(item) => item}
-        </Static>
-      )}
+      {/* Dynamic content: pending message and notifications */}
+      <OverflowProvider>
+        <Box flexDirection="column" width="100%">
+          {/* Pending message (streaming or loading) */}
+          {pendingMessage && (
+            <OutputItem
+              message={pendingMessage}
+              isStreaming={isLoading}
+            />
+          )}
 
-      {/* Display streaming content with tools (unified and interleaved) */}
-      {streamingItems.length > 0 && (
-        <OutputItem
-          message={{
-            role: 'assistant',
-            content: '', // Content is in streamItems
-            timestamp: Date.now(),
-            provider: currentProvider,
-            streamItems: streamingItems,
-          }}
-          isStreaming={true}
-        />
-      )}
-
-      {/* Display notifications */}
-      {notifications.map((notif, idx) => {
-        if (notif.type === 'info') {
-          return (
-            <Box key={`notif-${idx}`} marginY={1} paddingX={1}>
-              <Text color="cyan">ℹ </Text>
-              <Text color="white">{notif.message}</Text>
-            </Box>
-          );
-        } else if (notif.type === 'error') {
-          return (
-            <Box key={`notif-${idx}`} marginY={1} paddingX={1}>
-              <Text color="red">✗ Error: </Text>
-              <Text color="white">{notif.message}</Text>
-            </Box>
-          );
-        } else if (notif.type === 'success') {
-          return (
-            <Box key={`notif-${idx}`} marginY={1} paddingX={1}>
-              <Text color="cyan">✓ </Text>
-              <Text color="white">{notif.message}</Text>
-            </Box>
-          );
-        } else if (notif.type === 'provider-switch' && notif.from && notif.to) {
-          return (
-            <Box key={`notif-${idx}`} flexDirection="column" marginY={1} paddingX={1}>
-              <Text color="magenta">⚠ {notif.message}</Text>
-              <Box>
-                <Text color="gray">  Switching from </Text>
-                <ProviderBadge provider={notif.from} />
-                <Text color="gray"> to </Text>
-                <ProviderBadge provider={notif.to} />
-              </Box>
-            </Box>
-          );
-        }
-        return null;
-      })}
+          {/* Notifications */}
+          {notifications.map((notif, idx) => {
+            if (notif.type === 'info') {
+              return (
+                <Box key={`notif-${idx}`} marginY={1} paddingX={1}>
+                  <Text color="cyan">ℹ </Text>
+                  <Text color="white">{notif.message}</Text>
+                </Box>
+              );
+            } else if (notif.type === 'error') {
+              return (
+                <Box key={`notif-${idx}`} marginY={1} paddingX={1}>
+                  <Text color="red">✗ Error: </Text>
+                  <Text color="white">{notif.message}</Text>
+                </Box>
+              );
+            } else if (notif.type === 'success') {
+              return (
+                <Box key={`notif-${idx}`} marginY={1} paddingX={1}>
+                  <Text color="cyan">✓ </Text>
+                  <Text color="white">{notif.message}</Text>
+                </Box>
+              );
+            } else if (notif.type === 'provider-switch' && notif.from && notif.to) {
+              return (
+                <Box key={`notif-${idx}`} flexDirection="column" marginY={1} paddingX={1}>
+                  <Text color="magenta">⚠ {notif.message}</Text>
+                  <Box>
+                    <Text color="gray">  Switching from </Text>
+                    <ProviderBadge provider={notif.from} />
+                    <Text color="gray"> to </Text>
+                    <ProviderBadge provider={notif.to} />
+                  </Box>
+                </Box>
+              );
+            }
+            return null;
+          })}
+        </Box>
+      </OverflowProvider>
     </Box>
   );
 });

@@ -53,7 +53,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         </Box>
         <Box>
           <Text color="gray">  /switch &lt;provider&gt; </Text>
-          <Text color="white">Switch provider (claude, gemini, copilot)</Text>
+          <Text color="white">Switch provider (claude, gemini, copilot, deepseek, cursor)</Text>
         </Box>
         <Box>
           <Text color="gray">  /mode &lt;mode&gt;       </Text>

@@ -31,6 +31,16 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
   const { stdout } = useStdout();
   const color = getProviderColor(provider);
 
+  // Throttle updates to reduce flicker during typing
+  const lastUpdateRef = React.useRef<number>(0);
+  const throttledForceUpdate = React.useCallback(() => {
+    const now = Date.now();
+    if (now - lastUpdateRef.current > 16) { // ~60fps
+      lastUpdateRef.current = now;
+      forceUpdate((n) => n + 1);
+    }
+  }, []);
+
   const handleKeypress = (key: Key) => {
     if (!isActive) return;
 
@@ -93,7 +103,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
       } else {
         buffer.moveLeft();
       }
-      forceUpdate((n) => n + 1);
+      throttledForceUpdate();
       return;
     }
 
@@ -103,32 +113,32 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
       } else {
         buffer.moveRight();
       }
-      forceUpdate((n) => n + 1);
+      throttledForceUpdate();
       return;
     }
 
     if (key.name === 'up') {
       buffer.moveUp();
-      forceUpdate((n) => n + 1);
+      throttledForceUpdate();
       return;
     }
 
     if (key.name === 'down') {
       buffer.moveDown();
-      forceUpdate((n) => n + 1);
+      throttledForceUpdate();
       return;
     }
 
     // Handle Home/End
     if (key.name === 'home' || (key.ctrl && key.name === 'a')) {
       buffer.moveToStart();
-      forceUpdate((n) => n + 1);
+      throttledForceUpdate();
       return;
     }
 
     if (key.name === 'end' || (key.ctrl && key.name === 'e')) {
       buffer.moveToEnd();
-      forceUpdate((n) => n + 1);
+      throttledForceUpdate();
       return;
     }
 
@@ -147,17 +157,6 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
       return;
     }
 
-    // Handle Ctrl+C (clear buffer if there's text)
-    if (key.ctrl && key.name === 'c') {
-      const text = buffer.getText();
-      if (text.length > 0) {
-        buffer.clear();
-        setPasteInfo(null);
-        forceUpdate((n) => n + 1);
-        return;
-      }
-      // If buffer is empty, let it propagate for normal interrupt behavior
-    }
 
     // Handle Ctrl+K (delete to end)
     if (key.ctrl && key.name === 'k') {
@@ -172,7 +171,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
     if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.meta) {
       buffer.insertText(key.sequence);
       setPasteInfo(null);
-      forceUpdate((n) => n + 1);
+      throttledForceUpdate();
       return;
     }
   };
@@ -273,10 +272,8 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
     cursorCol = text.length;
   }
 
-  const displaySessionName = sessionName === 'default' ? 'unnamed session' : sessionName;
-
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
+    <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1} width="100%">
       {/* Provider badge and status */}
       <Box marginBottom={1}>
         {isLoading ? (
@@ -290,7 +287,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
         <Text> </Text>
         <ProviderBadge provider={provider} />
         <Text dimColor> | </Text>
-        <Text dimColor>{displaySessionName}</Text>
+        <Text dimColor>{sessionName}</Text>
       </Box>
 
       {/* Input prompt */}
@@ -303,6 +300,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
             const beforeCursor = line.slice(0, cursorCol);
             const atCursor = line[cursorCol] || ' ';
             const afterCursor = line.slice(cursorCol + 1);
+            
             return (
               <Box key={idx}>
                 {mapping && mapping.logicalLineIdx === 0 && isFirstLineOfLogical && (

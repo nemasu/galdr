@@ -175,12 +175,14 @@ export class SessionManager {
         claude: 0,
         gemini: 0,
         copilot: 0,
+        deepseek: 0,
         cursor: 0,
       },
       providerModels: {
         claude: 'default',
         gemini: 'default',
         copilot: 'default',
+        deepseek: 'default',
         cursor: 'default',
       },
     };
