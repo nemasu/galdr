@@ -6,6 +6,46 @@
  */
 
 /**
+ * Estimates the number of terminal lines a text string will occupy.
+ * This is a rough approximation that accounts for:
+ * - Line breaks in the text
+ * - Text wrapping based on terminal width
+ * - Code blocks (which don't wrap)
+ */
+export function estimateLineCount(text: string, terminalWidth: number = 80): number {
+  if (text.length === 0) return 0;
+
+  const lines = text.split('\n');
+  let totalLines = 0;
+  let inCodeBlock = false;
+
+  for (const line of lines) {
+    // Check if this line starts or ends a code block
+    if (line.trim().startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+      totalLines += 1;
+      continue;
+    }
+
+    if (inCodeBlock) {
+      // Code blocks don't wrap
+      totalLines += 1;
+    } else {
+      // Regular text wraps at terminal width
+      if (line.length === 0) {
+        totalLines += 1;
+      } else {
+        // Estimate wrapped lines (accounting for indentation and formatting)
+        const effectiveWidth = Math.max(terminalWidth - 4, 40); // Leave margin
+        totalLines += Math.ceil(line.length / effectiveWidth);
+      }
+    }
+  }
+
+  return totalLines;
+}
+
+/**
  * Finds the start of a code block that encloses the given index
  */
 function findEnclosingCodeBlockStart(content: string, index: number): number {
@@ -92,11 +132,31 @@ export function findLastSafeSplitPoint(content: string): number {
 }
 
 /**
- * Determines if the accumulated text should be split.
- * Split if text is over threshold AND we can find a safe split point.
+ * Determines if the accumulated text should be split based on terminal height.
+ * Split if text exceeds visible terminal lines AND we can find a safe split point.
+ *
+ * @param text The accumulated text content
+ * @param terminalHeight Available terminal height (rows)
+ * @param terminalWidth Terminal width for line wrapping calculations
+ * @param reservedLines Lines reserved for UI elements (input area, notifications, etc.)
+ * @returns true if the message should be split
  */
-export function shouldSplitMessage(text: string, threshold: number = 2000): boolean {
-  if (text.length < threshold) return false;
+export function shouldSplitMessage(
+  text: string,
+  terminalHeight: number = 24,
+  terminalWidth: number = 80,
+  reservedLines: number = 8
+): boolean {
+  if (text.length === 0) return false;
+
+  // Calculate how many lines are available for content
+  const availableLines = Math.max(terminalHeight - reservedLines, 10);
+
+  // Estimate how many lines this text will take
+  const estimatedLines = estimateLineCount(text, terminalWidth);
+
+  // Only split if we're exceeding available space
+  if (estimatedLines < availableLines) return false;
 
   const splitPoint = findLastSafeSplitPoint(text);
   // Only split if we found a point that's not at the very end

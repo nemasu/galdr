@@ -115,6 +115,74 @@ export class TextBuffer {
     this.cursorPosition = pos;
   }
 
+  moveUp(): void {
+    // Move cursor up one line
+    const lines = this.text.split('\n');
+    let charsProcessed = 0;
+    let currentLine = 0;
+    let colInLine = 0;
+
+    // Find current line and column
+    for (let i = 0; i < lines.length; i++) {
+      const lineLength = lines[i].length;
+      if (charsProcessed + lineLength >= this.cursorPosition) {
+        currentLine = i;
+        colInLine = this.cursorPosition - charsProcessed;
+        break;
+      }
+      charsProcessed += lineLength + 1; // +1 for newline
+    }
+
+    // Move to previous line if possible
+    if (currentLine > 0) {
+      const prevLineLength = lines[currentLine - 1].length;
+      const targetCol = Math.min(colInLine, prevLineLength);
+
+      // Calculate position in previous line
+      let newPos = 0;
+      for (let i = 0; i < currentLine - 1; i++) {
+        newPos += lines[i].length + 1;
+      }
+      newPos += targetCol;
+
+      this.cursorPosition = newPos;
+    }
+  }
+
+  moveDown(): void {
+    // Move cursor down one line
+    const lines = this.text.split('\n');
+    let charsProcessed = 0;
+    let currentLine = 0;
+    let colInLine = 0;
+
+    // Find current line and column
+    for (let i = 0; i < lines.length; i++) {
+      const lineLength = lines[i].length;
+      if (charsProcessed + lineLength >= this.cursorPosition) {
+        currentLine = i;
+        colInLine = this.cursorPosition - charsProcessed;
+        break;
+      }
+      charsProcessed += lineLength + 1; // +1 for newline
+    }
+
+    // Move to next line if possible
+    if (currentLine < lines.length - 1) {
+      const nextLineLength = lines[currentLine + 1].length;
+      const targetCol = Math.min(colInLine, nextLineLength);
+
+      // Calculate position in next line
+      let newPos = 0;
+      for (let i = 0; i <= currentLine; i++) {
+        newPos += lines[i].length + 1;
+      }
+      newPos += targetCol;
+
+      this.cursorPosition = newPos;
+    }
+  }
+
   deleteWord(): void {
     // Delete from cursor to start of word (like Ctrl+W)
     if (this.cursorPosition === 0) return;

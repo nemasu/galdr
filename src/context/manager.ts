@@ -1,21 +1,28 @@
 import fs from 'fs';
 import path from 'path';
 import { ConversationContext, Message, Provider, SwitchMode } from '../types/index.js';
+import { MessageSummarizer } from './summarizer.js';
+import { SessionManager } from './session.js';
 
 const CONTEXT_DIR = '.galdr';
 const CONTEXT_FILE = 'context.json';
 const AUTO_COMPACT_THRESHOLD = 50; // Auto-compact when messages exceed this
 const AUTO_COMPACT_KEEP = 20; // Keep this many recent messages
+const DEFAULT_SESSION = 'default';
 
 export class ContextManager {
   private contextPath: string;
   private context: ConversationContext;
   private autoCompactEnabled: boolean = true;
+  private summarizer: MessageSummarizer;
+  private sessionManager: SessionManager;
 
   constructor(workingDir: string = process.cwd()) {
     this.contextPath = path.join(workingDir, CONTEXT_DIR);
     this.ensureContextDir();
+    this.sessionManager = new SessionManager(workingDir);
     this.context = this.loadContext();
+    this.summarizer = new MessageSummarizer();
   }
 
   private ensureContextDir(): void {
@@ -29,18 +36,21 @@ export class ContextManager {
   }
 
   private loadContext(): ConversationContext {
-    const filePath = this.getContextFilePath();
+    const currentSessionName = this.sessionManager.getCurrentSessionName();
 
-    if (fs.existsSync(filePath)) {
-      try {
-        const data = fs.readFileSync(filePath, 'utf-8');
-        return JSON.parse(data);
-      } catch (error) {
-        console.error('Error loading context, creating new one:', error);
+    // Try to load the current session
+    let context = this.sessionManager.loadSession(currentSessionName);
+
+    // If session doesn't exist, create it
+    if (!context) {
+      if (!this.sessionManager.sessionExists(currentSessionName)) {
+        this.sessionManager.createSession(currentSessionName);
       }
+      context = this.sessionManager.loadSession(currentSessionName);
     }
 
-    return this.createDefaultContext();
+    // Fallback to default context if all else fails
+    return context || this.createDefaultContext();
   }
 
   private createDefaultContext(): ConversationContext {
@@ -64,11 +74,11 @@ export class ContextManager {
   }
 
   public save(): void {
-    const filePath = this.getContextFilePath();
-    fs.writeFileSync(filePath, JSON.stringify(this.context, null, 2));
+    const currentSessionName = this.sessionManager.getCurrentSessionName();
+    this.sessionManager.saveSession(currentSessionName, this.context);
   }
 
-  public addMessage(role: 'user' | 'assistant', content: string, provider?: Provider): { autoCompacted: boolean; removed: number } {
+  public async addMessage(role: 'user' | 'assistant', content: string, provider?: Provider): Promise<{ autoCompacted: boolean; removed: number; error?: string }> {
     this.context.messages.push({
       role,
       content,
@@ -79,8 +89,8 @@ export class ContextManager {
 
     // Auto-compact if threshold is exceeded
     if (this.autoCompactEnabled && this.context.messages.length > AUTO_COMPACT_THRESHOLD) {
-      const result = this.compact(AUTO_COMPACT_KEEP);
-      return { autoCompacted: result.compacted, removed: result.removed };
+      const result = await this.compact(AUTO_COMPACT_KEEP);
+      return { autoCompacted: result.compacted, removed: result.removed, error: result.error };
     }
 
     return { autoCompacted: false, removed: 0 };
@@ -135,22 +145,31 @@ export class ContextManager {
   }
 
   // Compact context by summarizing older messages
-  public compact(keepLast: number = 10): { compacted: boolean; removed: number } {
+  public async compact(keepLast: number = 10): Promise<{ compacted: boolean; removed: number; error?: string }> {
     if (this.context.messages.length > keepLast) {
       const recentMessages = this.context.messages.slice(-keepLast);
       const oldMessages = this.context.messages.slice(0, -keepLast);
 
-      // Create a summary of old messages
-      const summary: Message = {
-        role: 'assistant',
-        content: `[Context compacted: ${oldMessages.length} messages summarized]`,
-        timestamp: Date.now(),
-      };
+      try {
+        // Generate summary using LLM
+        const summaryContent = await this.summarizer.summarize(oldMessages);
 
-      this.context.messages = [summary, ...recentMessages];
-      this.save();
+        // Create a summary message
+        const summary: Message = {
+          role: 'assistant',
+          content: summaryContent,
+          timestamp: Date.now(),
+        };
 
-      return { compacted: true, removed: oldMessages.length };
+        this.context.messages = [summary, ...recentMessages];
+        this.save();
+
+        return { compacted: true, removed: oldMessages.length };
+      } catch (error) {
+        // If summarization fails, don't modify history
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        return { compacted: false, removed: 0, error: errorMessage };
+      }
     }
 
     return { compacted: false, removed: 0 };
@@ -211,5 +230,44 @@ export class ContextManager {
       this.save();
     }
     return this.context.providerModels[provider] || 'default';
+  }
+
+  // Session management methods
+  public getCurrentSessionName(): string {
+    return this.sessionManager.getCurrentSessionName();
+  }
+
+  public listSessions() {
+    return this.sessionManager.listSessions();
+  }
+
+  public createSession(sessionName: string, description?: string): boolean {
+    return this.sessionManager.createSession(sessionName, description);
+  }
+
+  public switchSession(sessionName: string): boolean {
+    // Save current session before switching
+    this.save();
+
+    // Switch to new session
+    if (!this.sessionManager.switchSession(sessionName)) {
+      return false;
+    }
+
+    // Load new session context
+    this.context = this.loadContext();
+    return true;
+  }
+
+  public deleteSession(sessionName: string): boolean {
+    return this.sessionManager.deleteSession(sessionName);
+  }
+
+  public renameSession(oldName: string, newName: string): boolean {
+    return this.sessionManager.renameSession(oldName, newName);
+  }
+
+  public getSessionMetadata(sessionName: string) {
+    return this.sessionManager.getSessionMetadata(sessionName);
   }
 }

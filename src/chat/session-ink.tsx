@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { render, Box, Text, useApp, Static } from 'ink';
+import { render, Box, Text, useApp, Static, useStdout } from 'ink';
 import { Provider, SwitchMode, Message, ToolInfo, StreamItem } from '../types/index.js';
 import { ContextManager } from '../context/manager.js';
 import { ProviderManager } from '../providers/index.js';
@@ -11,7 +11,7 @@ import { KeypressProvider, useKeypress, Key } from './contexts/KeypressContext.j
 import { TextBuffer } from './utils/TextBuffer.js';
 import { InputArea } from './components/InputArea.js';
 import { InkWriter, InkWriterCallbacks } from './utils/InkWriter.js';
-import { findLastSafeSplitPoint, getAccumulatedText } from './utils/messageSplitting.js';
+import { findLastSafeSplitPoint, getAccumulatedText, estimateLineCount } from './utils/messageSplitting.js';
 
 interface Notification {
   type: 'info' | 'error' | 'success' | 'provider-switch';
@@ -28,7 +28,9 @@ interface ChatAppProps {
 
 const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialPrompt }) => {
   const { exit } = useApp();
+  const { stdout } = useStdout();
   const [currentProvider, setCurrentProvider] = useState<Provider>(context.getCurrentProvider());
+  const [currentSession, setCurrentSession] = useState<string>(context.getCurrentSessionName());
   const [messages, setMessages] = useState<Message[]>(context.getMessages());
   const [isLoading, setIsLoading] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -73,12 +75,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     }
   }, [initialPrompt, initialPromptProcessed, isLoading]);
 
-  // Hide welcome screen once messages start appearing
+  // Hide welcome screen once messages start appearing or when streaming starts
   useEffect(() => {
-    if (messages.length > initialMessageCount) {
+    if (messages.length > initialMessageCount || streamingItems.length > 0) {
       setShowWelcome(false);
     }
-  }, [messages, initialMessageCount]);
+  }, [messages, initialMessageCount, streamingItems]);
 
   // Reset Ctrl+C count after 1 second
   useEffect(() => {
@@ -190,6 +192,30 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
         handleModelCommand(args);
         break;
 
+      case 'sessions':
+        handleSessionsCommand();
+        break;
+
+      case 'session-new':
+        handleSessionNewCommand(args);
+        break;
+
+      case 'session-load':
+        handleSessionLoadCommand(args);
+        break;
+
+      case 'session-save':
+        handleSessionSaveCommand(args);
+        break;
+
+      case 'session-delete':
+        handleSessionDeleteCommand(args);
+        break;
+
+      case 'session-rename':
+        handleSessionRenameCommand(args);
+        break;
+
       default:
         setNotifications([
           { type: 'error', message: `Unknown command: /${cmd}. Type /help for available commands.` },
@@ -227,7 +253,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     setNotifications([{ type: 'success', message: `Switch mode changed to ${mode}` }]);
   };
 
-  const handleCompactCommand = (args: string[]) => {
+  const handleCompactCommand = async (args: string[]) => {
     const keepCount = args.length > 0 ? parseInt(args[0]) : 10;
 
     if (isNaN(keepCount) || keepCount < 1) {
@@ -242,9 +268,13 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
       return;
     }
 
-    const result = context.compact(keepCount);
+    setNotifications([{ type: 'info', message: 'Compacting and summarizing messages...' }]);
 
-    if (result.compacted) {
+    const result = await context.compact(keepCount);
+
+    if (result.error) {
+      setNotifications([{ type: 'error', message: result.error }]);
+    } else if (result.compacted) {
       setMessages(context.getMessages());
       setNotifications([
         { type: 'success', message: `Compacted ${result.removed} messages, kept ${keepCount} recent messages` },
@@ -313,6 +343,117 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     setNotifications([{ type: 'success', message: `Model for ${provider} set to: ${model}` }]);
   };
 
+  const handleSessionsCommand = () => {
+    const sessions = context.listSessions();
+    const currentSessionName = context.getCurrentSessionName();
+
+    if (sessions.length === 0) {
+      setNotifications([{ type: 'info', message: 'No sessions found.' }]);
+      return;
+    }
+
+    const sessionLines = sessions.map((session) => {
+      const current = session.name === currentSessionName ? ' (current)' : '';
+      const desc = session.description ? ` - ${session.description}` : '';
+      const lastAccessed = new Date(session.lastAccessed).toLocaleString();
+      return `${session.name}${current}: ${session.messageCount} messages, last accessed: ${lastAccessed}${desc}`;
+    });
+
+    setNotifications([{ type: 'info', message: `Sessions:\n${sessionLines.join('\n')}` }]);
+  };
+
+  const handleSessionNewCommand = (args: string[]) => {
+    if (args.length === 0) {
+      setNotifications([{ type: 'error', message: 'Usage: /session-new <name> [description]' }]);
+      return;
+    }
+
+    const sessionName = args[0];
+    const description = args.slice(1).join(' ');
+
+    if (context.createSession(sessionName, description || undefined)) {
+      // Switch to the newly created session
+      if (context.switchSession(sessionName)) {
+        setCurrentSession(sessionName);
+        setMessages(context.getMessages());
+        setNotifications([{ type: 'success', message: `Created and switched to session: ${sessionName}` }]);
+      } else {
+        setNotifications([{ type: 'success', message: `Created session: ${sessionName}` }]);
+      }
+    } else {
+      setNotifications([{ type: 'error', message: `Session ${sessionName} already exists` }]);
+    }
+  };
+
+  const handleSessionLoadCommand = (args: string[]) => {
+    if (args.length === 0) {
+      setNotifications([{ type: 'error', message: 'Usage: /session-load <name>' }]);
+      return;
+    }
+
+    const sessionName = args[0];
+
+    if (context.switchSession(sessionName)) {
+      setCurrentSession(sessionName);
+      setMessages(context.getMessages());
+      setNotifications([{ type: 'success', message: `Switched to session: ${sessionName}` }]);
+    } else {
+      setNotifications([{ type: 'error', message: `Session ${sessionName} not found` }]);
+    }
+  };
+
+  const handleSessionSaveCommand = (args: string[]) => {
+    const description = args.join(' ');
+    const sessionName = context.getCurrentSessionName();
+    const metadata = context.getSessionMetadata(sessionName);
+
+    if (metadata) {
+      context.save();
+      setNotifications([{ type: 'success', message: `Saved session: ${sessionName}` }]);
+    } else {
+      setNotifications([{ type: 'error', message: 'Failed to save session' }]);
+    }
+  };
+
+  const handleSessionDeleteCommand = (args: string[]) => {
+    if (args.length === 0) {
+      setNotifications([{ type: 'error', message: 'Usage: /session-delete <name>' }]);
+      return;
+    }
+
+    const sessionName = args[0];
+
+    if (sessionName === context.getCurrentSessionName()) {
+      setNotifications([{ type: 'error', message: 'Cannot delete the current session' }]);
+      return;
+    }
+
+    if (context.deleteSession(sessionName)) {
+      setNotifications([{ type: 'success', message: `Deleted session: ${sessionName}` }]);
+    } else {
+      setNotifications([{ type: 'error', message: `Session ${sessionName} not found or could not be deleted` }]);
+    }
+  };
+
+  const handleSessionRenameCommand = (args: string[]) => {
+    if (args.length < 2) {
+      setNotifications([{ type: 'error', message: 'Usage: /session-rename <old-name> <new-name>' }]);
+      return;
+    }
+
+    const oldName = args[0];
+    const newName = args[1];
+
+    if (context.renameSession(oldName, newName)) {
+      if (oldName === context.getCurrentSessionName()) {
+        setCurrentSession(newName);
+      }
+      setNotifications([{ type: 'success', message: `Renamed session from ${oldName} to ${newName}` }]);
+    } else {
+      setNotifications([{ type: 'error', message: `Failed to rename session (session not found or new name already exists)` }]);
+    }
+  };
+
   const handleSubmit = async (input: string) => {
     // Check if it's a command
     if (input.startsWith('/')) {
@@ -339,9 +480,11 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     setMessages(newMessages);
 
     // Save user message to context
-    const userResult = context.addMessage('user', userInput);
+    const userResult = await context.addMessage('user', userInput);
 
-    if (userResult.autoCompacted) {
+    if (userResult.error) {
+      setNotifications([{ type: 'error', message: `Auto-compact failed: ${userResult.error}` }]);
+    } else if (userResult.autoCompacted) {
       setNotifications([{ type: 'info', message: `Auto-compacted history: ${userResult.removed} messages summarized` }]);
     }
 
@@ -358,11 +501,15 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
     // Get conversation history
     const conversationHistory = context.getMessages().slice(0, -1);
 
+    // Get terminal dimensions
+    const terminalHeight = stdout?.rows || 24;
+    const terminalWidth = stdout?.columns || 80;
+    const RESERVED_LINES = 8; // Input area + padding + notifications
+
     // Use a local variable to track streaming items to avoid stale closure issues
     let accumulatedStreamItems: StreamItem[] = [];
     let updateTimeoutId: NodeJS.Timeout | null = null;
     let pendingUpdate = false;
-    const SPLIT_THRESHOLD = 2000; // Split messages larger than 2000 chars
 
     // Throttled update function to batch re-renders
     const scheduleUpdate = () => {
@@ -389,6 +536,8 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
       if (splitPoint >= accumulatedText.length || splitPoint === 0) {
         return; // No valid split point
       }
+
+      //setNotifications([{ type: 'info', message: `[DEBUG] Splitting message at position ${splitPoint}` }]);
 
       // Find which items and where to split
       let charCount = 0;
@@ -478,11 +627,10 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
           accumulatedStreamItems.push({ type: 'text' as const, text: chunk });
         }
 
-        // Check if we should split the message
-        const accumulatedText = getAccumulatedText(accumulatedStreamItems);
-        if (accumulatedText.length > SPLIT_THRESHOLD) {
-          splitAndMoveToMessages();
-        }
+        // Proactively split whenever we have a safe split point
+        // This follows Gemini CLI's approach: maximize content in Static region
+        // to minimize re-renders and prevent flickering
+        splitAndMoveToMessages();
 
         scheduleUpdate();
       },
@@ -564,10 +712,12 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
       setNotifications([]); // Clear any notifications from streaming
 
       // Save assistant response to context
-      const assistantResult = context.addMessage('assistant', result.response, provider);
+      const assistantResult = await context.addMessage('assistant', result.response, provider);
       context.incrementProviderUsage(provider);
 
-      if (assistantResult.autoCompacted) {
+      if (assistantResult.error) {
+        setNotifications([{ type: 'error', message: `Auto-compact failed: ${assistantResult.error}` }]);
+      } else if (assistantResult.autoCompacted) {
         setNotifications([
           { type: 'info', message: `Auto-compacted history: ${assistantResult.removed} messages summarized` },
         ]);
@@ -654,6 +804,7 @@ const ChatApp: React.FC<ChatAppProps> = ({ context, providerManager, initialProm
         isActive={!isLoading}
         provider={currentProvider}
         isLoading={isLoading}
+        sessionName={currentSession}
       />
     </Box>
   );

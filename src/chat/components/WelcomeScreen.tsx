@@ -84,6 +84,26 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           <Text color="white">Set model for provider (e.g., /model claude default)</Text>
         </Box>
         <Box>
+          <Text color="gray">  /sessions          </Text>
+          <Text color="white">List all sessions</Text>
+        </Box>
+        <Box>
+          <Text color="gray">  /session-new &lt;name&gt; </Text>
+          <Text color="white">Create a new session</Text>
+        </Box>
+        <Box>
+          <Text color="gray">  /session-load &lt;name&gt;</Text>
+          <Text color="white">Load a session</Text>
+        </Box>
+        <Box>
+          <Text color="gray">  /session-delete &lt;n&gt; </Text>
+          <Text color="white">Delete a session</Text>
+        </Box>
+        <Box>
+          <Text color="gray">  /session-rename    </Text>
+          <Text color="white">Rename a session</Text>
+        </Box>
+        <Box>
           <Text color="gray">  /help              </Text>
           <Text color="white">Show this help</Text>
         </Box>

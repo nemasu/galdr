@@ -12,8 +12,9 @@ CLI tool that combines multiple AI coding assistants (Claude, Gemini, Copilot, C
   - Restored on startup with message count notification
   - Full conversation history sent to providers
 - **History Management**:
-  - Auto-compact at 50 messages (keeps 20 most recent)
-  - Manual compact with `/compact [N]`
+  - Auto-compact at 50 messages (keeps 20 most recent, summarizes older ones using available LLM)
+  - Manual compact with `/compact [N]` - creates AI-generated summary of removed messages
+  - Requires at least one LLM to be available (claude, gemini, copilot, or cursor) - will error if none available
   - Statistics via `/history` command
 - **Switch Modes**:
   - **Rollover**: Switch to next provider when token limit reached
@@ -116,7 +117,9 @@ galdr status
 
 4. **Auto-compact**: Triggered when message count exceeds 50
    - Keeps 20 most recent messages
-   - Manual compact: `/compact [N]`
+   - Summarizes older messages using first available LLM (claude > gemini > copilot > cursor)
+   - If no LLM is available, returns an error and history is not modified
+   - Manual compact: `/compact [N]` - keeps N recent messages, summarizes the rest
 
 
 ## Development
@@ -136,11 +139,9 @@ npm start chat "your prompt here"
 ```
 
 ## Future Enhancements
-
+- Improve token limit detection
 - Better tool messages
-- Summarize old history into single entry for compacting
 - Multi-provider comparison mode (send same prompt to all providers simultaneously)?
-- Session management (save/load named conversation sessions)
 - Search within conversation history
 
 ## License

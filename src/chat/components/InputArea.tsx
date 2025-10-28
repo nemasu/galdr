@@ -14,6 +14,7 @@ interface InputAreaProps {
   provider: Provider;
   isLoading?: boolean;
   label?: string;
+  sessionName?: string;
 }
 
 export const InputArea: React.FC<InputAreaProps> = React.memo(({
@@ -23,6 +24,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
   provider,
   isLoading = false,
   label = 'You> ',
+  sessionName = 'default',
 }) => {
   const [, forceUpdate] = useState(0);
   const [pasteInfo, setPasteInfo] = useState<{ lineCount: number } | null>(null);
@@ -105,6 +107,18 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
       return;
     }
 
+    if (key.name === 'up') {
+      buffer.moveUp();
+      forceUpdate((n) => n + 1);
+      return;
+    }
+
+    if (key.name === 'down') {
+      buffer.moveDown();
+      forceUpdate((n) => n + 1);
+      return;
+    }
+
     // Handle Home/End
     if (key.name === 'home' || (key.ctrl && key.name === 'a')) {
       buffer.moveToStart();
@@ -171,20 +185,84 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
     : buffer.getDisplayText();
   const cursorPos = buffer.getCursorDisplayPosition();
 
-  // Split text into lines
-  const lines = pasteInfo ? [text] : text.split('\n');
+  // Split text into logical lines (by \n)
+  const logicalLines = pasteInfo ? [text] : text.split('\n');
 
-  // Find which line the cursor is on
+  // Calculate available width for text (terminal width minus label/padding)
+  const terminalWidth = stdout?.columns || 80;
+  const labelWidth = label.length;
+
+  // Split into visual lines accounting for terminal wrapping
+  const visualLines: string[] = [];
+  const lineMapping: { logicalLineIdx: number; startCol: number }[] = [];
+
+  if (!pasteInfo) {
+    logicalLines.forEach((line, logicalIdx) => {
+      if (logicalIdx === 0) {
+        // First line has the label prefix
+        const availableWidth = terminalWidth - labelWidth - 4; // -4 for padding and borders
+        if (line.length <= availableWidth) {
+          visualLines.push(line);
+          lineMapping.push({ logicalLineIdx: logicalIdx, startCol: 0 });
+        } else {
+          // Need to wrap this line
+          let col = 0;
+          while (col < line.length) {
+            const chunk = line.slice(col, col + availableWidth);
+            visualLines.push(chunk);
+            lineMapping.push({ logicalLineIdx: logicalIdx, startCol: col });
+            col += availableWidth;
+          }
+        }
+      } else {
+        // Continuation lines have 2-space indent
+        const availableWidth = terminalWidth - 6; // -2 for indent, -4 for padding/borders
+        if (line.length <= availableWidth) {
+          visualLines.push(line);
+          lineMapping.push({ logicalLineIdx: logicalIdx, startCol: 0 });
+        } else {
+          // Need to wrap this line
+          let col = 0;
+          while (col < line.length) {
+            const chunk = line.slice(col, col + availableWidth);
+            visualLines.push(chunk);
+            lineMapping.push({ logicalLineIdx: logicalIdx, startCol: col });
+            col += availableWidth;
+          }
+        }
+      }
+    });
+  } else {
+    visualLines.push(text);
+    lineMapping.push({ logicalLineIdx: 0, startCol: 0 });
+  }
+
+  // Find which visual line the cursor is on
   let charsProcessed = 0;
   let cursorLine = 0;
   let cursorCol = cursorPos;
 
   if (!pasteInfo) {
-    for (let i = 0; i < lines.length; i++) {
-      const lineLength = lines[i].length;
+    for (let i = 0; i < logicalLines.length; i++) {
+      const lineLength = logicalLines[i].length;
       if (charsProcessed + lineLength >= cursorPos) {
-        cursorLine = i;
-        cursorCol = cursorPos - charsProcessed;
+        // Cursor is in this logical line
+        const colInLogicalLine = cursorPos - charsProcessed;
+
+        // Find the visual line for this position
+        for (let v = 0; v < visualLines.length; v++) {
+          const mapping = lineMapping[v];
+          if (mapping.logicalLineIdx === i) {
+            const visualLineLength = visualLines[v].length;
+            const endCol = mapping.startCol + visualLineLength;
+
+            if (colInLogicalLine >= mapping.startCol && colInLogicalLine <= endCol) {
+              cursorLine = v;
+              cursorCol = colInLogicalLine - mapping.startCol;
+              break;
+            }
+          }
+        }
         break;
       }
       charsProcessed += lineLength + 1; // +1 for the newline character
@@ -194,6 +272,8 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
     cursorLine = 0;
     cursorCol = text.length;
   }
+
+  const displaySessionName = sessionName === 'default' ? 'unnamed session' : sessionName;
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
@@ -209,23 +289,28 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
         )}
         <Text> </Text>
         <ProviderBadge provider={provider} />
+        <Text dimColor> | </Text>
+        <Text dimColor>{displaySessionName}</Text>
       </Box>
 
       {/* Input prompt */}
       <Box flexDirection="column">
-        {lines.map((line, idx) => {
+        {visualLines.map((line, idx) => {
+          const mapping = lineMapping[idx];
+          const isFirstLineOfLogical = mapping && mapping.startCol === 0;
+
           if (idx === cursorLine) {
             const beforeCursor = line.slice(0, cursorCol);
             const atCursor = line[cursorCol] || ' ';
             const afterCursor = line.slice(cursorCol + 1);
             return (
               <Box key={idx}>
-                {idx === 0 && (
+                {mapping && mapping.logicalLineIdx === 0 && isFirstLineOfLogical && (
                   <Text color="cyan" bold>
                     {label}
                   </Text>
                 )}
-                {idx !== 0 && <Text>{'  '}</Text>}
+                {(!mapping || mapping.logicalLineIdx !== 0 || !isFirstLineOfLogical) && <Text>{'  '}</Text>}
                 {pasteInfo ? (
                   <Text color="green">{line}</Text>
                 ) : (
@@ -241,12 +326,12 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
           }
           return (
             <Box key={idx}>
-              {idx === 0 && (
+              {mapping && mapping.logicalLineIdx === 0 && isFirstLineOfLogical && (
                 <Text color="cyan" bold>
                   {label}
                 </Text>
               )}
-              {idx !== 0 && <Text>{'  '}</Text>}
+              {(!mapping || mapping.logicalLineIdx !== 0 || !isFirstLineOfLogical) && <Text>{'  '}</Text>}
               <Text>{line}</Text>
             </Box>
           );
@@ -260,6 +345,7 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
     prevProps.isActive === nextProps.isActive &&
     prevProps.label === nextProps.label &&
     prevProps.provider === nextProps.provider &&
-    prevProps.isLoading === nextProps.isLoading
+    prevProps.isLoading === nextProps.isLoading &&
+    prevProps.sessionName === nextProps.sessionName
   );
 });

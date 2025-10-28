@@ -13,13 +13,54 @@ const program = new Command();
 program
   .name('galdr')
   .description('Combine multiple AI coding assistants (Claude, Gemini, Copilot)')
-  .version('0.1.0');
+  .version('0.1.0')
+  .option('--list-sessions', 'List all available sessions')
+  .option('-s, --session <name>', 'Start in a named session (creates it if it does not exist)');
 
 // Shared chat action handler
 async function handleChatAction(prompt: string | undefined, options: any) {
+  // Handle list-sessions option
+  if (options.listSessions) {
+    const context = new ContextManager();
+    const sessions = context.listSessions();
+
+    if (sessions.length === 0) {
+      console.log(chalk.yellow('No sessions found.'));
+      return;
+    }
+
+    const currentSessionName = context.getCurrentSessionName();
+    console.log(chalk.blue('Available sessions:'));
+    sessions.forEach((session) => {
+      const current = session.name === currentSessionName ? chalk.green(' (current)') : '';
+      const desc = session.description ? ` - ${session.description}` : '';
+      const lastAccessed = new Date(session.lastAccessed).toLocaleString();
+      console.log(`  ${chalk.bold(session.name)}${current}: ${session.messageCount} messages, last accessed: ${lastAccessed}${desc}`);
+    });
+    return;
+  }
+
   // Set verbose mode for this session only (not persisted)
   if (options.verbose) {
     process.env.GALDR_VERBOSE = '1';
+  }
+
+  // If a session is specified, switch to it (or create it if it doesn't exist)
+  // This must happen BEFORE creating ChatSessionInk so it picks up the correct session
+  if (options.session) {
+    const context = new ContextManager();
+    const sessionName = options.session;
+
+    // Create the session if it doesn't exist
+    if (!context.getSessionMetadata(sessionName)) {
+      context.createSession(sessionName);
+      console.log(chalk.green(`Created new session: ${sessionName}`));
+    }
+
+    // Switch to the session
+    if (context.switchSession(sessionName)) {
+      console.log(chalk.blue(`Switched to session: ${sessionName}`));
+    }
   }
 
   const chatSession = new ChatSessionInk();
@@ -118,7 +159,7 @@ program
   .option('-c, --clear', 'Clear conversation context')
   .option('-s, --show', 'Show conversation history')
   .option('--compact [keep]', 'Compact context, keeping last N messages (default: 10)')
-  .action((options) => {
+  .action(async (options) => {
     const context = new ContextManager();
 
     if (options.clear) {
@@ -135,8 +176,15 @@ program
 
     if (options.compact !== undefined) {
       const keep = typeof options.compact === 'string' ? parseInt(options.compact) : 10;
-      context.compact(keep);
-      console.log(chalk.green(`Context compacted, kept last ${keep} messages`));
+      console.log(chalk.blue('Compacting and summarizing messages...'));
+      const result = await context.compact(keep);
+      if (result.error) {
+        console.log(chalk.red(`Error: ${result.error}`));
+      } else if (result.compacted) {
+        console.log(chalk.green(`Context compacted, kept last ${keep} messages`));
+      } else {
+        console.log(chalk.yellow('No compaction needed.'));
+      }
       return;
     }
 
