@@ -73,6 +73,12 @@ Available commands:
 - `/status` - Show provider availability and usage
 - `/verbose` - Toggle verbose output mode
 - `/help` - Show commands
+- `/sessions` - List all saved sessions
+- `/session-new <name> [description]` - Create a new session
+- `/session-load <name>` - Switch to an existing session
+- `/session-save [description]` - Save the current session
+- `/session-delete <name>` - Delete a session
+- `/session-rename <old-name> <new-name>` - Rename a session
 
 Chat interface:
 - Full-screen UI adapts to terminal size
