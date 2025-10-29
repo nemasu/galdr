@@ -12,7 +12,7 @@ A CLI tool that integrates multiple AI coding assistants (Claude, Gemini, Copilo
 - **Context Persistence**: Complete conversation history stored and restored between sessions
 - **Context Compaction**: Automatic summarization of long conversations to manage token limits
 - **Session Management**: Save, load, and manage multiple conversation sessions
-- **DeepSeek Tool Integration**: Built-in support for file operations (read, write, list, find, edit)
+- **DeepSeek Tool Integration**: Built-in support for file operations (read, write, list, find, edit, Google search, DuckDuckGo search, web fetch)
 - **Existing Tool Integration**: Leverages installed AI CLI tools without additional configuration
 
 ## Installation
@@ -24,8 +24,8 @@ Install at least one of these AI CLI tools:
 - [Claude CLI](https://claude.com/claude-code)
 - [Gemini CLI](https://github.com/google/generative-ai-cli)
 - [GitHub Copilot CLI](https://githubnext.com/projects/copilot-cli)
-- [Cursor CLI](https://www.cursor.com) *(basic support)*
 - [DeepSeek API](https://platform.deepseek.com) *(requires API key)*
+- [Cursor CLI](https://www.cursor.com) *untested*
 
 ### Setup
 
@@ -144,7 +144,6 @@ npm start
 
 ### Planned Enhancements
 
-- Add web search/fetch to DeepSeek provider
 - Improve token limit detection
 - Improve session management (todo list-like?)
 - Context usage indicator
