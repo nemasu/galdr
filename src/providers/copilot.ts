@@ -145,14 +145,14 @@ export class CopilotProvider extends BaseProvider {
       // Output the text exactly as received
       // Only add newline if this isn't the last line (which means there was a \n after it in the chunk)
       if (this.inkWriter) {
-        if (!isLastLine) {
-          // There was a newline after this line in the chunk, so preserve it
+        if (!isLastLine && line) {
+          // There was a newline after this line in the chunk, and line has content - preserve it
           this.inkWriter.writeText(line + '\n');
         } else if (line) {
           // Last line with content - output as-is without adding newline
           this.inkWriter.writeText(line);
         }
-        // If it's the last line and it's empty, skip it (it was just trailing data after a \n)
+        // Skip empty lines (both trailing and in the middle of the stream)
       }
     }
   }

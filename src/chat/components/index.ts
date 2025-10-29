@@ -1,5 +1,4 @@
 export { ProviderBadge, getProviderColor } from './ProviderBadge.js';
-export { WelcomeScreen } from './WelcomeScreen.js';
 export { ContentArea } from './ContentArea.js';
 export { CustomSpinner } from './CustomSpinner.js';
 export { InputArea } from './InputArea.js';

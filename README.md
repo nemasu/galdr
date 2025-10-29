@@ -144,6 +144,7 @@ npm start
 
 ### Planned Enhancements
 
+- Add web search/fetch to DeepSeek provider
 - Improve token limit detection
 - Improve session management (todo list-like?)
 - Context usage indicator

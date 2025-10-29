@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { render, Box, Text, useApp, Static, useStdout } from 'ink';
+import { render, Box, useApp, } from 'ink';
 import { Provider, SwitchMode, Message, ToolInfo, StreamItem } from '../types/index.js';
 import { ContextManager } from '../context/manager.js';
 import { ProviderManager } from '../providers/index.js';
-import { WelcomeScreen } from './components/WelcomeScreen.js';
-import { ProviderBadge } from './components/ProviderBadge.js';
 import { ContentArea } from './components/ContentArea.js';
 import { OutputItem } from './components/OutputItem.js';
 import { KeypressProvider, useKeypress, Key } from './contexts/KeypressContext.js';
@@ -27,13 +25,11 @@ interface GaldrAppProps {
 
 const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPrompt }) => {
   const { exit } = useApp();
-  const { stdout } = useStdout();
   const [currentProvider, setCurrentProvider] = useState<Provider>(context.getCurrentProvider());
   const [currentSession, setCurrentSession] = useState<string>(context.getCurrentSessionName());
   const [messages, setMessages] = useState<Message[]>(context.getMessages());
   const [isLoading, setIsLoading] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [showWelcome, setShowWelcome] = useState(true);
   const [abortController, setAbortController] = useState(new AbortController());
   const [ctrlCCount, setCtrlCCount] = useState(0);
 
@@ -48,8 +44,32 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
   // Memoize switch mode to prevent unnecessary re-renders
   const switchMode = useMemo(() => context.getSwitchMode(), [context]);
 
+  // Generate startup message - simple version shown on app start
+  const generateStartupMessage = useMemo(() => {
+    return '__STARTUP_MESSAGE__';
+  }, [currentProvider, switchMode, initialMessageCount]);
+
+  // Generate full help message - shown when /help is used
+  const generateHelpMessage = useMemo(() => {
+    return '__HELP_MESSAGE__';
+  }, []);
+
+  // Add startup message on app start (always, even if context is restored)
+  useEffect(() => {
+    const startupMessage: Message = {
+      role: 'assistant',
+      content: generateStartupMessage,
+      timestamp: Date.now(),
+    };
+    setMessages((prev) => [...prev, startupMessage]);
+  }, []);
+
   // Separate completed messages from the initial count
-  const completedMessages = useMemo(() => messages.slice(initialMessageCount), [messages, initialMessageCount]);
+  const completedMessages = useMemo(() => {
+    // If messages is empty, return empty array
+    if (messages.length === 0) return [];
+    return messages.slice(initialMessageCount);
+  }, [messages, initialMessageCount]);
 
   // Keep only recent history to avoid performance issues (last 50 messages)
   const recentHistory = useMemo(() => {
@@ -64,9 +84,15 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
   const historyItems = useMemo(
     () =>
       recentHistory.map((msg) => (
-        <OutputItem key={msg.timestamp} message={msg} />
+        <OutputItem 
+          key={msg.timestamp} 
+          message={msg} 
+          currentProvider={currentProvider}
+          switchMode={switchMode}
+          initialMessageCount={initialMessageCount}
+        />
       )),
-    [recentHistory]
+    [recentHistory, currentProvider, switchMode, initialMessageCount]
   );
 
   // Process initial prompt if provided (after component is fully initialized)
@@ -173,9 +199,8 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         break;
 
       case 'clear':
+        // Clear history
         context.clear();
-        setMessages([]);
-        setShowWelcome(true);
         setNotifications([{ type: 'success', message: 'Chat history cleared' }]);
         break;
 
@@ -192,7 +217,12 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         break;
 
       case 'help':
-        setShowWelcome(true);
+        const helpMessage: Message = {
+          role: 'assistant',
+          content: generateHelpMessage,
+          timestamp: Date.now(),
+        };
+        setMessages((prev) => [...prev, helpMessage]);
         setNotifications([]);
         break;
 
@@ -537,6 +567,7 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
     let currentTextBuffer = ''; // Buffer for current text segment
     let lastUpdate = Date.now();
     const THROTTLE_MS = 16; // ~60fps
+    let messageTimestampCounter = Date.now(); // Ensure unique timestamps for split messages
 
     // Helper to get full text content from all text items
     const getFullTextContent = () => {
@@ -555,7 +586,7 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
       setPendingMessage({
         role: 'assistant',
         content: getFullTextContent(),
-        timestamp: Date.now(),
+        timestamp: messageTimestampCounter, // Use consistent timestamp
         provider,
         streamItems: [...accumulatedStreamItems],
       });
@@ -633,10 +664,11 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
     const finalTextContent = getFullTextContent();
 
     // Final update with complete content
+    messageTimestampCounter++;
     const finalPendingMessage: Message = {
       role: 'assistant',
       content: finalTextContent,
-      timestamp: Date.now(),
+      timestamp: messageTimestampCounter,
       provider,
       streamItems: [...accumulatedStreamItems],
     };
@@ -652,10 +684,11 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         .filter(tool => tool !== undefined);
 
       // Move pending message to completed history
+      messageTimestampCounter++;
       const completedMessage: Message = {
         role: 'assistant',
         content: finalTextContent || result.response,
-        timestamp: Date.now(),
+        timestamp: messageTimestampCounter,
         provider,
         tools: tools.length > 0 ? tools : undefined,
         streamItems: accumulatedStreamItems.length > 0 ? accumulatedStreamItems : undefined,
@@ -743,7 +776,6 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
       {/* Main output area - displays all messages, tools, and notifications */}
       <Box flexGrow={1} flexShrink={1} flexDirection="column" overflow="hidden">
         <ContentArea
-          showWelcome={showWelcome}
           currentProvider={currentProvider}
           switchMode={switchMode}
           initialMessageCount={initialMessageCount}

@@ -24,12 +24,15 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "@types/jsdom": "^27.0.0",
     "chalk": "^4.1.2",
     "commander": "^12.1.0",
     "ink": "6.2.3",
     "ink-gradient": "^3.0.0",
     "ink-spinner": "^5.0.0",
     "inquirer": "^9.2.0",
+    "jsdom": "^27.0.1",
     "ora": "^5.4.1",
     "react": "^19.2.0"
   },

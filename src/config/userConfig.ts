@@ -6,8 +6,10 @@ import { Provider, SwitchMode } from '../types/index.js';
 export interface UserConfig {
   apiKeys?: {
     deepseek?: string;
+    googleSearch?: string;  // Google Custom Search API Key
     // Add more provider API keys as needed
   };
+  googleSearchEngineId?: string;  // Google Custom Search Engine ID (CX)
   defaultProvider?: Provider;
   defaultMode?: SwitchMode;
   defaultModels?: {
@@ -43,7 +45,9 @@ export class UserConfigManager {
       const defaultConfig: UserConfig = {
         apiKeys: {
           deepseek: '',
+          googleSearch: '',
         },
+        googleSearchEngineId: '',
         defaultProvider: undefined,
         defaultMode: undefined,
         defaultModels: {
@@ -84,15 +88,25 @@ export class UserConfigManager {
   }
 
   // API Keys
-  getApiKey(provider: 'deepseek'): string | undefined {
+  getApiKey(provider: 'deepseek' | 'googleSearch'): string | undefined {
     return this.config.apiKeys?.[provider];
   }
 
-  setApiKey(provider: 'deepseek', apiKey: string): void {
+  setApiKey(provider: 'deepseek' | 'googleSearch', apiKey: string): void {
     if (!this.config.apiKeys) {
       this.config.apiKeys = {};
     }
     this.config.apiKeys[provider] = apiKey;
+    this.saveConfig();
+  }
+
+  // Google Search Engine ID
+  getGoogleSearchEngineId(): string | undefined {
+    return this.config.googleSearchEngineId;
+  }
+
+  setGoogleSearchEngineId(searchEngineId: string): void {
+    this.config.googleSearchEngineId = searchEngineId;
     this.saveConfig();
   }
 
