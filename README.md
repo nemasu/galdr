@@ -19,7 +19,7 @@ A CLI tool that integrates multiple AI coding assistants (Claude, Gemini, Copilo
 
 ```bash
 # Install from npm
-npm i @nemasu/galdr
+npm i -g @nemasu/galdr
 ```
 
 ### Prerequisites
