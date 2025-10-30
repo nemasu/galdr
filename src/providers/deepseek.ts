@@ -2,7 +2,6 @@ import { BaseProvider } from './base.js';
 import { ProviderResult, Message } from '../types/index.js';
 import { UserConfigManager } from '../config/userConfig.js';
 import { getToolDefinitions, executeTool, ToolDefinition } from '../tools/index.js';
-import chalk from 'chalk';
 
 interface DeepSeekMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -383,6 +382,12 @@ export class DeepSeekProvider extends BaseProvider {
     }
   }
 
+  private hasGoogleSearchKeys(): boolean {
+    const googleApiKey = this.configManager.getApiKey('googleSearch');
+    const googleSearchEngineId = this.configManager.getGoogleSearchEngineId();
+    return !!(googleApiKey && googleSearchEngineId);
+  }
+
   public async execute(
     prompt: string,
     conversationHistory: Message[] = [],
@@ -407,6 +412,11 @@ export class DeepSeekProvider extends BaseProvider {
 
     // Add system message if this is the first message (no conversation history)
     if (conversationHistory.length === 0) {
+      const hasGoogleSearch = this.hasGoogleSearchKeys();
+      const searchProviderInfo = hasGoogleSearch 
+        ? 'Google Search is configured and available. Use google_search as the primary search provider.'
+        : 'Google Search is NOT configured. Use duckduckgo_search as the default search provider (no API key required).';
+
       messages.unshift({
         role: 'system',
         content: `You are a helpful AI coding assistant with access to powerful development tools. You can:
@@ -438,6 +448,9 @@ Web Operations:
   * Returns title, author, text content, and excerpt
   * Works best with articles, documentation, blog posts, and Stack Overflow answers
   * Use after google_search or duckduckgo_search to read the full content of search results
+
+Search Provider Status:
+${searchProviderInfo}
 
 Command Execution:
 - Execute bash: Use execute_bash to run shell commands (npm, git, tests, builds, etc.)

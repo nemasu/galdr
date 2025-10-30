@@ -16,6 +16,9 @@ export class ContextManager {
   private autoCompactEnabled: boolean = true;
   private summarizer: MessageSummarizer;
   private sessionManager: SessionManager;
+  private lastSaveTime: number = 0;
+  private saveThrottleMs: number = 500; // Throttle saves to at most once every 500ms
+  private pendingSave: boolean = false;
 
   constructor(workingDir: string = process.cwd()) {
     this.contextPath = path.join(workingDir, CONTEXT_DIR);
@@ -80,6 +83,32 @@ export class ContextManager {
     this.sessionManager.saveSession(currentSessionName, this.context);
   }
 
+  // Throttled save to prevent excessive file writes
+  private throttledSave(): void {
+    const now = Date.now();
+    
+    // If enough time has passed since last save, save immediately
+    if (now - this.lastSaveTime >= this.saveThrottleMs) {
+      this.save();
+      this.lastSaveTime = now;
+      this.pendingSave = false;
+      return;
+    }
+    
+    // Otherwise, schedule a save for later if not already pending
+    if (!this.pendingSave) {
+      this.pendingSave = true;
+      const delay = this.saveThrottleMs - (now - this.lastSaveTime);
+      setTimeout(() => {
+        if (this.pendingSave) {
+          this.save();
+          this.lastSaveTime = Date.now();
+          this.pendingSave = false;
+        }
+      }, delay);
+    }
+  }
+
   public async addMessage(role: 'user' | 'assistant', content: string, provider?: Provider): Promise<{ autoCompacted: boolean; removed: number; error?: string }> {
     this.context.messages.push({
       role,
@@ -96,6 +125,24 @@ export class ContextManager {
     }
 
     return { autoCompacted: false, removed: 0 };
+  }
+
+  // Update the last assistant message content (for incremental streaming)
+  public updateLastAssistantMessage(content: string, provider?: Provider): boolean {
+    if (this.context.messages.length === 0) {
+      return false;
+    }
+
+    const lastMessage = this.context.messages[this.context.messages.length - 1];
+    
+    // Only update if the last message is from the assistant and matches the provider
+    if (lastMessage.role === 'assistant' && (!provider || lastMessage.provider === provider)) {
+      lastMessage.content = content;
+      this.throttledSave();
+      return true;
+    }
+
+    return false;
   }
 
   public getMessages(): Message[] {
@@ -267,7 +314,7 @@ export class ContextManager {
   }
 
   public createSession(sessionName: string, description?: string): boolean {
-    return this.sessionManager.createSession(sessionName, description);
+    return this.sessionManager.createSession(sessionName, description, this.context.currentProvider);
   }
 
   public switchSession(sessionName: string): boolean {
@@ -294,5 +341,9 @@ export class ContextManager {
 
   public getSessionMetadata(sessionName: string) {
     return this.sessionManager.getSessionMetadata(sessionName);
+  }
+
+  public updateSessionDescription(sessionName: string, description: string): boolean {
+    return this.sessionManager.updateSessionDescription(sessionName, description);
   }
 }

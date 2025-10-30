@@ -2,8 +2,6 @@
 
 A CLI tool that integrates multiple AI coding assistants (Claude, Gemini, Copilot, DeepSeek API, Cursor) with provider switching and persistent context management.
 
-**Note: This tool is currently in development. Expect bugs and breaking changes.**
-
 ## Features
 
 - **Multi-Provider Integration**: Single interface for Claude, Gemini, Copilot, DeepSeek, and Cursor
@@ -145,7 +143,6 @@ npm start
 ### Planned Enhancements
 
 - Improve token limit detection
-- Improve session management (todo list-like?)
 - Context usage indicator
 - Multi-provider comparison mode?
 

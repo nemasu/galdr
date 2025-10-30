@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { ConversationContext } from '../types/index.js';
+import { ConversationContext, Provider } from '../types/index.js';
 
 const CONTEXT_DIR = '.galdr';
 const SESSIONS_DIR = 'sessions';
@@ -152,7 +152,7 @@ export class SessionManager {
     return true;
   }
 
-  public createSession(sessionName: string, description?: string): boolean {
+  public createSession(sessionName: string, description?: string, currentProvider?: Provider): boolean {
     if (this.sessionExists(sessionName)) {
       return false;
     }
@@ -169,7 +169,7 @@ export class SessionManager {
     // Create empty session file with default context
     const defaultContext: ConversationContext = {
       messages: [],
-      currentProvider: 'claude',
+      currentProvider: currentProvider || 'claude',
       switchMode: 'manual',
       providerUsage: {
         claude: 0,
@@ -250,5 +250,30 @@ export class SessionManager {
 
   public getSessionMetadata(sessionName: string): SessionMetadata | null {
     return this.index.sessions[sessionName] || null;
+  }
+
+  public updateSessionDescription(sessionName: string, description: string): boolean {
+    if (!this.sessionExists(sessionName)) {
+      return false;
+    }
+
+    // Update description in metadata
+    this.index.sessions[sessionName].description = description || undefined;
+    this.saveIndex();
+
+    // Also update the session file if it exists
+    const filePath = this.getSessionFilePath(sessionName);
+    if (fs.existsSync(filePath)) {
+      try {
+        const data = fs.readFileSync(filePath, 'utf-8');
+        const sessionData: SessionData = JSON.parse(data);
+        sessionData.metadata.description = description || undefined;
+        fs.writeFileSync(filePath, JSON.stringify(sessionData, null, 2));
+      } catch (error) {
+        console.error(`Error updating session file for ${sessionName}:`, error);
+      }
+    }
+
+    return true;
   }
 }

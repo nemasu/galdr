@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { render, Box, useApp, } from 'ink';
+import { render, Box, Text, useApp, } from 'ink';
+import { SessionSelector } from './components/SessionSelector.js';
+import { NewSessionDialog } from './components/NewSessionDialog.js';
+import { EditDescriptionDialog } from './components/EditDescriptionDialog.js';
 import { Provider, SwitchMode, Message, ToolInfo, StreamItem } from '../types/index.js';
 import { ContextManager } from '../context/manager.js';
 import { ProviderManager } from '../providers/index.js';
@@ -142,12 +145,25 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
   }, [ctrlCCount, isLoading, abortController, exit, buffer]);
 
   const [isActive, setIsActive] = useState(true);
+  const [showSessionSelector, setShowSessionSelector] = useState(false);
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
+  const [showEditDescriptionDialog, setShowEditDescriptionDialog] = useState(false);
+  const [editingSessionName, setEditingSessionName] = useState<string | null>(null);
 
   // Global keypress handler for Ctrl+C, Escape, and Ctrl+S
   const handleGlobalKeypress = (key: Key) => {
     // Handle Ctrl+C
     if (key.ctrl && key.name === 'c') {
       setCtrlCCount((prev) => prev + 1);
+      return;
+    }
+
+    // Handle Ctrl+S - Session management
+    if (key.ctrl && key.name === 's') {
+      if (!isLoading) {
+        setIsActive(false); // Deactivate input while in session selection
+        setShowSessionSelector(true);
+      }
       return;
     }
 
@@ -159,12 +175,106 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         setIsLoading(false);
         setPendingMessage(null);
         setAbortController(new AbortController());
+      } else if (showSessionSelector) {
+        // Exit session selector
+        setShowSessionSelector(false);
+        setIsActive(true);
+      } else if (showNewSessionDialog) {
+        // Exit new session dialog
+        setShowNewSessionDialog(false);
+        setIsActive(true);
+      } else if (showEditDescriptionDialog) {
+        // Exit edit description dialog
+        setShowEditDescriptionDialog(false);
+        setEditingSessionName(null);
+        setIsActive(true);
       }
       return;
     }
   };
 
   useKeypress(handleGlobalKeypress, { isActive: true });
+
+  // Session selector handlers
+  const handleSessionSelect = (sessionName: string) => {
+    if (context.switchSession(sessionName)) {
+      setCurrentSession(sessionName);
+      setMessages(context.getMessages());
+      setNotifications([{ type: 'success', message: `Switched to session: ${sessionName}` }]);
+      setShowSessionSelector(false);
+      setIsActive(true);
+    } else {
+      setNotifications([{ type: 'error', message: `Failed to switch to session: ${sessionName}` }]);
+    }
+  };
+
+  const handleNewSession = () => {
+    setShowSessionSelector(false);
+    setShowNewSessionDialog(true);
+  };
+
+  const handleSessionSelectorClose = () => {
+    setShowSessionSelector(false);
+    setIsActive(true);
+  };
+
+  const handleSessionDelete = (sessionName: string) => {
+    if (context.deleteSession(sessionName)) {
+      setNotifications([{ type: 'success', message: `Deleted session: ${sessionName}` }]);
+      // Refresh the session list by closing and reopening the selector
+      setShowSessionSelector(false);
+      setTimeout(() => setShowSessionSelector(true), 100);
+    } else {
+      setNotifications([{ type: 'error', message: `Failed to delete session: ${sessionName}` }]);
+    }
+  };
+
+  const handleSessionEditDescription = (sessionName: string) => {
+    setEditingSessionName(sessionName);
+    setShowSessionSelector(false);
+    setShowEditDescriptionDialog(true);
+  };
+
+  const handleEditDescriptionConfirm = (description: string) => {
+    if (editingSessionName && context.updateSessionDescription(editingSessionName, description)) {
+      setNotifications([{ type: 'success', message: `Updated description for session: ${editingSessionName}` }]);
+    } else {
+      setNotifications([{ type: 'error', message: `Failed to update description` }]);
+    }
+    setShowEditDescriptionDialog(false);
+    setEditingSessionName(null);
+    // Return to session selector
+    setShowSessionSelector(true);
+  };
+
+  const handleEditDescriptionCancel = () => {
+    setShowEditDescriptionDialog(false);
+    setEditingSessionName(null);
+    // Return to session selector
+    setShowSessionSelector(true);
+  };
+
+  const handleNewSessionConfirm = (name: string, description?: string) => {
+    if (context.createSession(name, description)) {
+      // Switch to the newly created session
+      if (context.switchSession(name)) {
+        setCurrentSession(name);
+        setMessages(context.getMessages());
+        setNotifications([{ type: 'success', message: `Created and switched to session: ${name}` }]);
+      } else {
+        setNotifications([{ type: 'success', message: `Created session: ${name}` }]);
+      }
+    } else {
+      setNotifications([{ type: 'error', message: `Session ${name} already exists` }]);
+    }
+    setShowNewSessionDialog(false);
+    setIsActive(true);
+  };
+
+  const handleNewSessionCancel = () => {
+    setShowNewSessionDialog(false);
+    setIsActive(true);
+  };
 
   const handleCommand = async (command: string) => {
     const parts = command.slice(1).split(' ');
@@ -568,6 +678,7 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
     let lastUpdate = Date.now();
     const THROTTLE_MS = 16; // ~60fps
     let messageTimestampCounter = Date.now(); // Ensure unique timestamps for split messages
+    let lastSavedContent = ''; // Track last saved content to avoid redundant saves
 
     // Helper to get full text content from all text items
     const getFullTextContent = () => {
@@ -577,15 +688,40 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         .join('');
     };
 
+    // Helper to save completed content to context incrementally
+    const saveCompletedContent = async (content: string) => {
+      if (content === lastSavedContent) return; // Avoid redundant saves
+      
+      try {
+        // Try to update the last assistant message, or create a new one
+        const updated = context.updateLastAssistantMessage(content, provider);
+        if (!updated) {
+          // No existing assistant message found, create a new one
+          await context.addMessage('assistant', content, provider);
+        }
+        
+        lastSavedContent = content;
+      } catch (error) {
+        console.error('Failed to save incremental content:', error);
+      }
+    };
+
     // Helper to update pending message (throttled)
-    const updatePendingMessage = () => {
+    const updatePendingMessage = async () => {
       const now = Date.now();
       if (now - lastUpdate < THROTTLE_MS) return;
       lastUpdate = now;
 
+      const currentContent = getFullTextContent();
+      
+      // Save completed content to context
+      if (currentContent && currentContent !== lastSavedContent) {
+        await saveCompletedContent(currentContent);
+      }
+
       setPendingMessage({
         role: 'assistant',
-        content: getFullTextContent(),
+        content: currentContent,
         timestamp: messageTimestampCounter, // Use consistent timestamp
         provider,
         streamItems: [...accumulatedStreamItems],
@@ -595,7 +731,7 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
     // Create InkWriter callbacks
     let currentToolId = 0;
     const writerCallbacks: InkWriterCallbacks = {
-      onTextChunk: (chunk: string) => {
+      onTextChunk: async (chunk: string) => {
         currentTextBuffer += chunk;
 
         // Update or create text item in stream
@@ -608,9 +744,9 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
           accumulatedStreamItems.push({ type: 'text' as const, text: currentTextBuffer });
         }
 
-        updatePendingMessage();
+        await updatePendingMessage();
       },
-      onToolUse: (name: string, parameters?: any) => {
+      onToolUse: async (name: string, parameters?: any) => {
         // Start a new text buffer for text after this tool
         currentTextBuffer = '';
 
@@ -619,9 +755,9 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         const newItem = { type: 'tool' as const, tool: toolInfo };
         accumulatedStreamItems.push(newItem);
 
-        updatePendingMessage();
+        await updatePendingMessage();
       },
-      onToolComplete: (success: boolean) => {
+      onToolComplete: async (success: boolean) => {
         // Find the last tool item and update its status
         for (let i = accumulatedStreamItems.length - 1; i >= 0; i--) {
           if (accumulatedStreamItems[i].type === 'tool' && accumulatedStreamItems[i].tool) {
@@ -633,16 +769,16 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
           }
         }
 
-        updatePendingMessage();
+        await updatePendingMessage();
       },
-      onInfo: (message: string) => {
+      onInfo: async (message: string) => {
         // Start a new text buffer for text after this info
         currentTextBuffer = '';
 
         const newItem = { type: 'info' as const, info: message };
         accumulatedStreamItems.push(newItem);
 
-        updatePendingMessage();
+        await updatePendingMessage();
       },
     };
 
@@ -698,17 +834,11 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
       setMessages((prev) => [...prev, completedMessage]);
       setPendingMessage(null);
 
-      // Save assistant response to context
-      const assistantResult = await context.addMessage('assistant', result.response, provider);
+      // The assistant response has already been saved incrementally, just update usage
       context.incrementProviderUsage(provider);
 
-      if (assistantResult.error) {
-        setNotifications([{ type: 'error', message: `Auto-compact failed: ${assistantResult.error}` }]);
-      } else if (assistantResult.autoCompacted) {
-        setNotifications([
-          { type: 'info', message: `Auto-compacted history: ${assistantResult.removed} messages summarized` },
-        ]);
-      }
+      // Final save to ensure everything is persisted
+      context.save();
 
       // Handle token limit
       if (result.tokenLimitReached) {
@@ -730,7 +860,13 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         }
       }
     } else {
-      // On error, keep pending message visible with error notification
+      // On error or cancellation, save whatever was completed before the interruption
+      const completedContent = getFullTextContent();
+      if (completedContent && completedContent !== lastSavedContent) {
+        await saveCompletedContent(completedContent);
+      }
+
+      // Keep pending message visible with error notification
       setNotifications((prev) => [...prev, { type: 'error', message: result.error || 'Unknown error occurred' }]);
 
       if (result.tokenLimitReached) {
@@ -771,8 +907,45 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
     setNotifications([{ type: 'error', message: 'All providers are unavailable or have reached their limits.' }]);
   };
 
+
+
   return (
     <Box flexDirection="column">
+      {/* Session selector overlay */}
+      {showSessionSelector && (
+        <SessionSelector
+          sessions={context.listSessions()}
+          currentSession={currentSession}
+          onSelect={handleSessionSelect}
+          onNewSession={handleNewSession}
+          onClose={handleSessionSelectorClose}
+          onDelete={handleSessionDelete}
+          onEditDescription={handleSessionEditDescription}
+          isActive={showSessionSelector}
+        />
+      )}
+      
+      {/* New session dialog */}
+      {showNewSessionDialog && (
+        <NewSessionDialog
+          onConfirm={handleNewSessionConfirm}
+          onCancel={handleNewSessionCancel}
+          isActive={showNewSessionDialog}
+          existingSessions={context.listSessions().map(s => s.name)}
+        />
+      )}
+
+      {/* Edit description dialog */}
+      {showEditDescriptionDialog && editingSessionName && (
+        <EditDescriptionDialog
+          sessionName={editingSessionName}
+          currentDescription={context.getSessionMetadata(editingSessionName)?.description}
+          onConfirm={handleEditDescriptionConfirm}
+          onCancel={handleEditDescriptionCancel}
+          isActive={showEditDescriptionDialog}
+        />
+      )}
+
       {/* Main output area - displays all messages, tools, and notifications */}
       <Box flexGrow={1} flexShrink={1} flexDirection="column" overflow="hidden">
         <ContentArea

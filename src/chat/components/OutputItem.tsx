@@ -75,6 +75,10 @@ export const OutputItem: React.FC<OutputItemProps> = React.memo(({
             <Text color="yellowBright" bold>/help</Text>
             <Text color="yellow"> for command list</Text>
           </Box>
+          <Box>
+            <Text color="yellowBright">Ctrl+S</Text>
+            <Text color="gray"> for session management</Text>
+          </Box>
         </Box>
         <Box marginTop={1}>
           <Text color="gray">{'─'.repeat(80)}</Text>
@@ -104,7 +108,7 @@ export const OutputItem: React.FC<OutputItemProps> = React.memo(({
           <Text><Text color="cyan" bold>/model</Text> <Text color="yellow">{'<p>'}</Text> <Text color="yellow">{'<model>'}</Text>  <Text color="white">Set model for provider (e.g., /model claude default)</Text></Text>
           <Text><Text color="cyan" bold>/sessions</Text>           <Text color="white">List all sessions</Text></Text>
           <Text><Text color="cyan" bold>/session-new</Text> <Text color="yellow">{'<name>'}</Text> <Text color="white">Create a new session</Text></Text>
-          <Text><Text color="cyan" bold>/session-load</Text> <Text color="yellow">{'<name>'}</Text><Text color="white">Load a session</Text></Text>
+          <Text><Text color="cyan" bold>/session-load</Text> <Text color="yellow">{'<name>'}</Text> <Text color="white">Load a session</Text></Text>
           <Text><Text color="cyan" bold>/session-delete</Text> <Text color="yellow">{'<n>'}</Text> <Text color="white">Delete a session</Text></Text>
           <Text><Text color="cyan" bold>/session-rename</Text>     <Text color="white">Rename a session</Text></Text>
           <Text><Text color="cyan" bold>/help</Text>               <Text color="white">Show this help</Text></Text>
