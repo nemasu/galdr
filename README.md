@@ -15,6 +15,13 @@ A CLI tool that integrates multiple AI coding assistants (Claude, Gemini, Copilo
 
 ## Installation
 
+### NPM Package (Recommended)
+
+```bash
+# Install from npm
+npm i @nemasu/galdr
+```
+
 ### Prerequisites
 
 Install at least one of these AI CLI tools:
@@ -25,7 +32,7 @@ Install at least one of these AI CLI tools:
 - [DeepSeek API](https://platform.deepseek.com) *(requires API key)*
 - [Cursor CLI](https://www.cursor.com) *untested*
 
-### Setup
+### Development Setup (From Source)
 
 ```bash
 # Clone and install
@@ -128,6 +135,8 @@ Organize conversations into sessions:
 ## Development
 
 ### Building from Source
+
+For development or if you want to build from source:
 
 ```bash
 # Install dependencies
