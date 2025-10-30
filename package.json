@@ -1,8 +1,27 @@
 {
-  "name": "galdr",
+  "name": "@nemasu/galdr",
   "version": "0.1.0",
-  "type": "module",
   "description": "CLI tool that combines multiple AI coding assistants (Claude, Gemini, Copilot, DeepSeek API, Cursor)",
+  "keywords": [
+    "cli",
+    "ai",
+    "assistant",
+    "claude",
+    "gemini",
+    "copilot",
+    "deepseek"
+  ],
+  "homepage": "https://github.com/nemasu/galdr#readme",
+  "bugs": {
+    "url": "https://github.com/nemasu/galdr/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nemasu/galdr.git"
+  },
+  "license": "MIT",
+  "author": "",
+  "type": "module",
   "main": "dist/index.js",
   "bin": {
     "galdr": "dist/index.js"
@@ -13,18 +32,9 @@
     "start": "node dist/index.js",
     "prepare": "npm run build"
   },
-  "keywords": [
-    "cli",
-    "ai",
-    "assistant",
-    "claude",
-    "gemini",
-    "copilot"
-  ],
-  "author": "",
-  "license": "MIT",
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
+    "@nemasu/galdr": "file:",
     "@types/jsdom": "^27.0.0",
     "chalk": "^4.1.2",
     "commander": "^12.1.0",
