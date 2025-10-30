@@ -1,6 +1,6 @@
 {
   "name": "@nemasu/galdr",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CLI tool that combines multiple AI coding assistants (Claude, Gemini, Copilot, DeepSeek API, Cursor)",
   "keywords": [
     "cli",
@@ -26,15 +26,17 @@
   "bin": {
     "galdr": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "start": "node dist/index.js",
-    "prepare": "npm run build"
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
-    "@nemasu/galdr": "file:",
     "@types/jsdom": "^27.0.0",
     "chalk": "^4.1.2",
     "commander": "^12.1.0",
