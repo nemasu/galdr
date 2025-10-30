@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import inquirer from 'inquirer';
 import chalk from 'chalk';
 import { ContextManager } from './context/manager.js';
 import { ProviderManager } from './providers/index.js';
@@ -13,7 +12,7 @@ const program = new Command();
 
 program
   .name('galdr')
-  .description('Combine multiple AI coding assistants (Claude, Gemini, Copilot)')
+  .description('Combine multiple AI coding assistants (Claude, Gemini, Copilot, DeepSeek API, Cursor)')
   .version('0.1.0')
   .option('--list-sessions', 'List all available sessions')
   .option('-s, --session <name>', 'Start in a named session (creates it if it does not exist)');
@@ -310,14 +309,6 @@ program
       }
       console.log(`  ${provider}: ${status}`);
     }
-
-    console.log(chalk.bold('\nUsage Statistics:'));
-    const usage = context.getProviderUsage();
-    console.log(`  Claude: ${usage.claude} requests`);
-    console.log(`  Gemini: ${usage.gemini} requests`);
-    console.log(`  Copilot: ${usage.copilot} requests`);
-    console.log(`  DeepSeek: ${usage.deepseek} requests`);
-    console.log(`  Cursor: ${usage.cursor} requests`);
   });
 
 program.parse();

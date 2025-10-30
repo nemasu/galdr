@@ -12,6 +12,7 @@ import { KeypressProvider, useKeypress, Key } from './contexts/KeypressContext.j
 import { TextBuffer } from './utils/TextBuffer.js';
 import { InputArea } from './components/InputArea.js';
 import { InkWriter, InkWriterCallbacks } from './utils/InkWriter.js';
+import chalk from 'chalk';
 
 interface Notification {
   type: 'info' | 'error' | 'success' | 'provider-switch';
@@ -450,7 +451,6 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
 
   const handleStatusCommand = async () => {
     const availability = await providerManager.checkAllAvailability();
-    const usage = context.getProviderUsage();
 
     const statusLines: string[] = [];
     const providers: Provider[] = ['claude', 'gemini', 'copilot', 'deepseek', 'cursor'];
@@ -460,13 +460,13 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
       let status: string;
 
       if (provider === 'deepseek') {
-        status = available ? '✓ Built-in (API key set)' : '⚠ Built-in (API key not set)';
+        status = available ? chalk.green('✓ Built-in (API key set)') : chalk.yellow('⚠ Built-in (API key not set)');
       } else {
-        status = available ? '✓ Available' : '✗ Not found';
+        status = available ? chalk.green('✓ Available') : chalk.red('✗ Not found');
       }
 
       const model = context.getProviderModel(provider);
-      statusLines.push(`${provider}: ${status} (${usage[provider]} requests, model: ${model})`);
+      statusLines.push(`${provider}: ${status} (model: ${model})`);
     }
 
     setNotifications([{ type: 'info', message: `Provider Status:\n${statusLines.join('\n')}` }]);
@@ -833,9 +833,6 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
       // Add to history and clear pending message
       setMessages((prev) => [...prev, completedMessage]);
       setPendingMessage(null);
-
-      // The assistant response has already been saved incrementally, just update usage
-      context.incrementProviderUsage(provider);
 
       // Final save to ensure everything is persisted
       context.save();

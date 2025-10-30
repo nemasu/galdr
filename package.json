@@ -2,7 +2,7 @@
   "name": "galdr",
   "version": "0.1.0",
   "type": "module",
-  "description": "CLI tool that combines multiple AI coding assistants (Claude, Gemini, Copilot)",
+  "description": "CLI tool that combines multiple AI coding assistants (Claude, Gemini, Copilot, DeepSeek API, Cursor)",
   "main": "dist/index.js",
   "bin": {
     "galdr": "dist/index.js"
@@ -32,13 +32,11 @@
     "ink-gradient": "^3.0.0",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
-    "inquirer": "^9.2.0",
     "jsdom": "^27.0.1",
     "ora": "^5.4.1",
     "react": "^19.2.0"
   },
   "devDependencies": {
-    "@types/inquirer": "^9.0.7",
     "@types/node": "^22.10.2",
     "@types/react": "^19.2.2",
     "typescript": "^5.7.2"

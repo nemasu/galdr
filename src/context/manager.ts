@@ -3,6 +3,7 @@ import path from 'path';
 import { ConversationContext, Message, Provider, SwitchMode } from '../types/index.js';
 import { MessageSummarizer } from './summarizer.js';
 import { SessionManager } from './session.js';
+import { UserConfigManager } from '../config/userConfig.js';
 
 const CONTEXT_DIR = '.galdr';
 const CONTEXT_FILE = 'context.json';
@@ -19,11 +20,13 @@ export class ContextManager {
   private lastSaveTime: number = 0;
   private saveThrottleMs: number = 500; // Throttle saves to at most once every 500ms
   private pendingSave: boolean = false;
+  private userConfig: UserConfigManager;
 
   constructor(workingDir: string = process.cwd()) {
     this.contextPath = path.join(workingDir, CONTEXT_DIR);
     this.ensureContextDir();
-    this.sessionManager = new SessionManager(workingDir);
+    this.userConfig = new UserConfigManager();
+    this.sessionManager = new SessionManager(workingDir, this.userConfig);
     this.context = this.loadContext();
     this.summarizer = new MessageSummarizer();
   }
@@ -59,21 +62,14 @@ export class ContextManager {
   private createDefaultContext(): ConversationContext {
     return {
       messages: [],
-      currentProvider: 'claude', // Default: try claude first
-      switchMode: 'manual', // Default: manual switching
-      providerUsage: {
-        claude: 0,
-        gemini: 0,
-        copilot: 0,
-        deepseek: 0,
-        cursor: 0,
-      },
+      currentProvider: this.userConfig.getDefaultProvider() || 'claude', // Default: try claude first
+      switchMode: this.userConfig.getDefaultMode() || 'manual', // Default: manual switching
       providerModels: {
-        claude: 'default',
-        gemini: 'default',
-        copilot: 'default',
-        deepseek: 'default',
-        cursor: 'default',
+        claude: this.userConfig.getDefaultModel('claude') || 'default',
+        gemini: this.userConfig.getDefaultModel('gemini') || 'default',
+        copilot: this.userConfig.getDefaultModel('copilot') || 'default',
+        deepseek: this.userConfig.getDefaultModel('deepseek') || 'default',
+        cursor: this.userConfig.getDefaultModel('cursor') || 'default',
       },
     };
   }
@@ -167,44 +163,8 @@ export class ContextManager {
     this.save();
   }
 
-  public incrementProviderUsage(provider: Provider): void {
-    // Ensure providerUsage exists and has the provider key (for backward compatibility)
-    if (!this.context.providerUsage) {
-      this.context.providerUsage = {
-        claude: 0,
-        gemini: 0,
-        copilot: 0,
-        deepseek: 0,
-        cursor: 0,
-      };
-    }
-    if (this.context.providerUsage[provider] === undefined) {
-      this.context.providerUsage[provider] = 0;
-    }
-    this.context.providerUsage[provider]++;
-    this.save();
-  }
-
-  public getProviderUsage(): { claude: number; gemini: number; copilot: number; deepseek: number; cursor: number } {
-    // Ensure all providers have usage counts (for backward compatibility with old sessions)
-    return {
-      claude: this.context.providerUsage.claude ?? 0,
-      gemini: this.context.providerUsage.gemini ?? 0,
-      copilot: this.context.providerUsage.copilot ?? 0,
-      deepseek: this.context.providerUsage.deepseek ?? 0,
-      cursor: this.context.providerUsage.cursor ?? 0,
-    };
-  }
-
   public clear(): void {
     this.context.messages = [];
-    this.context.providerUsage = {
-      claude: 0,
-      gemini: 0,
-      copilot: 0,
-      deepseek: 0,
-      cursor: 0,
-    };
     this.save();
   }
 

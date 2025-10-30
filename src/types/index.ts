@@ -29,13 +29,6 @@ export interface ConversationContext {
   messages: Message[];
   currentProvider: Provider;
   switchMode: SwitchMode;
-  providerUsage: {
-    claude: number;
-    gemini: number;
-    copilot: number;
-    deepseek: number;
-    cursor: number;
-  };
   providerModels?: {
     claude?: string;
     gemini?: string;

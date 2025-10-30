@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { ConversationContext, Provider } from '../types/index.js';
+import { UserConfigManager } from '../config/userConfig.js';
 
 const CONTEXT_DIR = '.galdr';
 const SESSIONS_DIR = 'sessions';
@@ -29,11 +30,13 @@ export class SessionManager {
   private sessionsPath: string;
   private metadataPath: string;
   private index: SessionIndex;
+  private userConfig: UserConfigManager;
 
-  constructor(workingDir: string = process.cwd()) {
+  constructor(workingDir: string = process.cwd(), userConfig?: UserConfigManager) {
     this.contextPath = path.join(workingDir, CONTEXT_DIR);
     this.sessionsPath = path.join(this.contextPath, SESSIONS_DIR);
     this.metadataPath = path.join(this.sessionsPath, METADATA_FILE);
+    this.userConfig = userConfig || new UserConfigManager();
     this.ensureSessionsDir();
     this.index = this.loadIndex();
   }
@@ -169,21 +172,14 @@ export class SessionManager {
     // Create empty session file with default context
     const defaultContext: ConversationContext = {
       messages: [],
-      currentProvider: currentProvider || 'claude',
-      switchMode: 'manual',
-      providerUsage: {
-        claude: 0,
-        gemini: 0,
-        copilot: 0,
-        deepseek: 0,
-        cursor: 0,
-      },
+      currentProvider: currentProvider || this.userConfig.getDefaultProvider() || 'claude',
+      switchMode: this.userConfig.getDefaultMode() || 'manual',
       providerModels: {
-        claude: 'default',
-        gemini: 'default',
-        copilot: 'default',
-        deepseek: 'default',
-        cursor: 'default',
+        claude: this.userConfig.getDefaultModel('claude') || 'default',
+        gemini: this.userConfig.getDefaultModel('gemini') || 'default',
+        copilot: this.userConfig.getDefaultModel('copilot') || 'default',
+        deepseek: this.userConfig.getDefaultModel('deepseek') || 'default',
+        cursor: this.userConfig.getDefaultModel('cursor') || 'default',
       },
     };
 
