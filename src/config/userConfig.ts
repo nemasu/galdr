@@ -7,7 +7,6 @@ export interface UserConfig {
   apiKeys?: {
     deepseek?: string;
     googleSearch?: string;  // Google Custom Search API Key
-    // Add more provider API keys as needed
   };
   googleSearchEngineId?: string;  // Google Custom Search Engine ID (CX)
   defaultProvider?: Provider;

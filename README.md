@@ -1,6 +1,6 @@
 # Galdr
 
-A CLI tool that integrates multiple AI coding assistants (Claude, Gemini, Copilot, DeepSeek API, Cursor) with provider switching and persistent context management.
+A CLI tool that integrates multiple CLI AI coding assistants (Claude Code, Gemini CLI, Copilot CLI, Cursor CLI) and DeepSeek API support with provider switching and persistent context management.
 
 ## Features
 
@@ -8,10 +8,10 @@ A CLI tool that integrates multiple AI coding assistants (Claude, Gemini, Copilo
 - **Provider Switching**: Automatic switching between providers when token limits are reached
 - **Switching Modes**: Rollover, manual, and round-robin provider selection strategies
 - **Context Persistence**: Complete conversation history stored and restored between sessions
-- **Context Compaction**: Automatic summarization of long conversations to manage token limits
+- **Context Compaction**: Automatic summarization of long conversations to manage token session limits
 - **Session Management**: Save, load, and manage multiple conversation sessions
 - **DeepSeek Tool Integration**: Built-in support for file operations (read, write, list, find, edit, Google search, DuckDuckGo search, web fetch)
-- **Existing Tool Integration**: Leverages installed AI CLI tools without additional configuration
+- **Existing Tool Integration**: No API account necessary, Galdr leverages installed AI CLI tools.
 
 ## Installation
 
@@ -70,7 +70,7 @@ galdr --provider gemini
 | `/compact [keep]` | Compact history, keep N recent messages |
 | `/history` | Show conversation statistics |
 | `/status` | Show provider availability |
-| `/verbose` | Toggle verbose output |
+| `/verbose` | Toggle verbose logging |
 | `/help` | Show all commands |
 | `/sessions` | List saved sessions |
 | `/session-new <name> [desc]` | Create new session |
@@ -147,6 +147,26 @@ npm run build
 
 # Run locally
 npm start
+```
+
+### Testing
+
+- **Credit Limit Detection**: Tests for detecting credit limit messages across all providers
+- **Session Limit Logic**: Tests for context limit detection and conversation trimming
+
+```bash
+# Run all tests
+npm test
+
+# Run specific test categories
+npm test -- --testPathPattern="credit-limit"
+npm test -- --testPathPattern="session-limit"
+
+# Run in watch mode
+npm run test:watch
+
+# Generate coverage report
+npm run test:coverage
 ```
 
 ### Planned Enhancements

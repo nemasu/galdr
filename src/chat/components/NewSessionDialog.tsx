@@ -72,7 +72,7 @@ export const NewSessionDialog: React.FC<NewSessionDialogProps> = ({
               value={name}
               onChange={setName}
               onSubmit={handleNameSubmit}
-              placeholder="e.g., project-todo, meeting-notes"
+              placeholder="e.g., feature, bugfix"
             />
           </Box>
           {error && (

@@ -307,6 +307,27 @@ export function getToolDefinitions(): ToolDefinition[] {
           required: ['query']
         }
       }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'get_current_date',
+        description: 'Gets the current date and time. Returns the current date in various formats including ISO string, local time, and UTC. Useful for time-sensitive operations and contextual responses.',
+        parameters: {
+          type: 'object',
+          properties: {
+            timezone: {
+              type: 'string',
+              description: 'Optional timezone for the date (e.g., "UTC", "America/New_York", "Asia/Tokyo"). Defaults to local system time.'
+            },
+            format: {
+              type: 'string',
+              description: 'Optional format for the date output. Options: "iso", "local", "utc", "full". Defaults to "full" which shows multiple formats.'
+            }
+          },
+          required: []
+        }
+      }
     }
   ];
 }
@@ -344,6 +365,8 @@ export async function executeTool(
         return await executeDuckDuckGoSearch(args.query, args.num_results, args.region, display, shouldDisplayTool);
       case 'fetch_page':
         return await executeFetchPage(args.url, args.include_html, display, shouldDisplayTool);
+      case 'get_current_date':
+        return await executeGetCurrentDate(args.timezone, args.format, display, shouldDisplayTool);
       default:
         return `Error: Unknown tool ${toolName}`;
     }
@@ -458,18 +481,70 @@ async function executeListDirectory(
     }
 
     const entries: string[] = [];
+    const MAX_FILES = 1000;
+    const MAX_DEPTH = 10;
+    const EXCLUDED_DIRS = new Set([
+      'node_modules',
+      '.git',
+      'dist',
+      'build',
+      '.next',
+      '__pycache__',
+      '.venv',
+      'venv',
+      'target',
+      'out',
+      '.cache',
+      'coverage'
+    ]);
 
-    const listDir = async (dirPath: string, prefix: string = ''): Promise<void> => {
+    let truncated = false;
+    let truncationReason = '';
+
+    const listDir = async (dirPath: string, prefix: string = '', depth: number = 0): Promise<void> => {
+      // Check depth limit
+      if (depth > MAX_DEPTH) {
+        if (!truncated) {
+          truncated = true;
+          truncationReason = `Maximum depth of ${MAX_DEPTH} levels reached`;
+        }
+        return;
+      }
+
+      // Check file count limit
+      if (entries.length >= MAX_FILES) {
+        if (!truncated) {
+          truncated = true;
+          truncationReason = `Maximum file count of ${MAX_FILES} reached`;
+        }
+        return;
+      }
+
       const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
 
       for (const item of items) {
+        // Check file count limit before processing each item
+        if (entries.length >= MAX_FILES) {
+          if (!truncated) {
+            truncated = true;
+            truncationReason = `Maximum file count of ${MAX_FILES} reached`;
+          }
+          return;
+        }
+
         const fullPath = path.join(dirPath, item.name);
         const relativePath = prefix ? path.join(prefix, item.name) : item.name;
 
         if (item.isDirectory()) {
+          // Skip excluded directories
+          if (EXCLUDED_DIRS.has(item.name)) {
+            entries.push(`[DIR]  ${relativePath}/ (skipped)`);
+            continue;
+          }
+
           entries.push(`[DIR]  ${relativePath}/`);
           if (recursive) {
-            await listDir(fullPath, relativePath);
+            await listDir(fullPath, relativePath, depth + 1);
           }
         } else {
           const stats = await fs.promises.stat(fullPath);
@@ -484,7 +559,15 @@ async function executeListDirectory(
       return `Directory ${directoryPath} is empty`;
     }
 
-    return `Directory listing for ${directoryPath}:\n${entries.join('\n')}`;
+    let result = `Directory listing for ${directoryPath}:\n${entries.join('\n')}`;
+
+    if (truncated) {
+      result += `\n\n⚠️  Output truncated: ${truncationReason}`;
+      result += `\n    Showing first ${entries.length} entries.`;
+      result += `\n    Consider using a more specific path or non-recursive listing.`;
+    }
+
+    return result;
   } catch (error: any) {
     throw new Error(`Failed to list directory ${directoryPath}: ${error.message}`);
   }
@@ -535,6 +618,21 @@ async function executeFindInFiles(
       }
     };
 
+    const EXCLUDED_DIRS = new Set([
+      'node_modules',
+      '.git',
+      'dist',
+      'build',
+      '.next',
+      '__pycache__',
+      '.venv',
+      'venv',
+      'target',
+      'out',
+      '.cache',
+      'coverage'
+    ]);
+
     const searchDir = async (dirPath: string, prefix: string = ''): Promise<void> => {
       const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
 
@@ -542,8 +640,8 @@ async function executeFindInFiles(
         const fullPath = path.join(dirPath, item.name);
         const relativePath = prefix ? path.join(prefix, item.name) : item.name;
 
-        // Skip node_modules and .git directories
-        if (item.isDirectory() && (item.name === 'node_modules' || item.name === '.git')) {
+        // Skip excluded directories
+        if (item.isDirectory() && EXCLUDED_DIRS.has(item.name)) {
           continue;
         }
 
@@ -1126,5 +1224,67 @@ async function executeFetchPage(
     return output.join('\n');
   } catch (error: any) {
     throw new Error(`Failed to fetch page: ${error.message}`);
+  }
+}
+
+/**
+ * Gets the current date and time
+ */
+async function executeGetCurrentDate(
+  timezone?: string,
+  format?: string,
+  display?: ToolDisplay,
+  shouldDisplayTool?: (toolName: string) => boolean
+): Promise<string> {
+  try {
+    // Show tool usage to user
+    if (shouldDisplayTool?.('GetCurrentDate') && display) {
+      display.showTool('GetCurrentDate', {
+        timezone: timezone || 'local',
+        format: format || 'full'
+      });
+    }
+
+    const now = new Date();
+    const output: string[] = [];
+
+    // Handle different formats
+    switch (format) {
+      case 'iso':
+        return now.toISOString();
+      
+      case 'local':
+        return now.toString();
+      
+      case 'utc':
+        return now.toUTCString();
+      
+      case 'full':
+      default:
+        output.push('Current Date and Time:');
+        output.push(`- ISO 8601: ${now.toISOString()}`);
+        output.push(`- Local: ${now.toString()}`);
+        output.push(`- UTC: ${now.toUTCString()}`);
+        output.push(`- Date: ${now.toDateString()}`);
+        output.push(`- Time: ${now.toTimeString()}`);
+        output.push(`- Unix Timestamp: ${now.getTime()} (ms since epoch)`);
+        
+        // Timezone information
+        const timezoneOffset = now.getTimezoneOffset();
+        const offsetHours = Math.abs(Math.floor(timezoneOffset / 60));
+        const offsetMinutes = Math.abs(timezoneOffset % 60);
+        const offsetSign = timezoneOffset <= 0 ? '+' : '-';
+        
+        output.push(`- Timezone: Local (UTC${offsetSign}${offsetHours.toString().padStart(2, '0')}:${offsetMinutes.toString().padStart(2, '0')})`);
+        
+        // Additional formats
+        output.push(`- Locale String: ${now.toLocaleString()}`);
+        output.push(`- Locale Date: ${now.toLocaleDateString()}`);
+        output.push(`- Locale Time: ${now.toLocaleTimeString()}`);
+        
+        return output.join('\n');
+    }
+  } catch (error: any) {
+    throw new Error(`Failed to get current date: ${error.message}`);
   }
 }

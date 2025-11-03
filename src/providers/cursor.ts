@@ -23,8 +23,13 @@ export class CursorProvider extends BaseProvider {
     };
   }
 
-  detectTokenLimit(output: string): boolean {
-    // Only check for actual error messages, not mentions in regular text
+  isUsageLimitReached(output: string, httpStatus?: number): boolean {
+    // Cursor uses HTTP 429 for rate limits and quota limits
+    if (httpStatus === 429) {
+      return true;
+    }
+    
+    // Also check for Cursor-specific token limit error messages
     const errorPatterns = [
       /reached.*token limit/i,
       //TODO add these as you find them

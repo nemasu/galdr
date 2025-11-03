@@ -13,13 +13,8 @@ import { TextBuffer } from './utils/TextBuffer.js';
 import { InputArea } from './components/InputArea.js';
 import { InkWriter, InkWriterCallbacks } from './utils/InkWriter.js';
 import chalk from 'chalk';
-
-interface Notification {
-  type: 'info' | 'error' | 'success' | 'provider-switch';
-  message: string;
-  from?: Provider;
-  to?: Provider;
-}
+import { verboseLogger } from '../utils/logger.js';
+import { Notification, SpecialMessageType } from './utils/DisplayManager.js';
 
 interface GaldrAppProps {
   context: ContextManager;
@@ -41,39 +36,39 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
   const [pendingMessage, setPendingMessage] = useState<Message | null>(null);
 
   const buffer = useMemo(() => new TextBuffer(), []);
-  const initialMessageCount = useMemo(() => messages.length, []);
   const [initialPromptProcessed, setInitialPromptProcessed] = useState(false);
   const [bufferUpdateTrigger, setBufferUpdateTrigger] = useState(0);
+  const [initialMessageCount, setInitialMessageCount] = useState(0);
 
   // Memoize switch mode to prevent unnecessary re-renders
   const switchMode = useMemo(() => context.getSwitchMode(), [context]);
 
   // Generate startup message - simple version shown on app start
-  const generateStartupMessage = useMemo(() => {
-    return '__STARTUP_MESSAGE__';
-  }, [currentProvider, switchMode, initialMessageCount]);
+  const startupMessage: Message = useMemo(() => ({
+    role: 'assistant' as const,
+    content: SpecialMessageType.STARTUP,
+    timestamp: Date.now(),
+  }), []);
 
   // Generate full help message - shown when /help is used
   const generateHelpMessage = useMemo(() => {
-    return '__HELP_MESSAGE__';
+    return SpecialMessageType.HELP;
   }, []);
 
-  // Add startup message on app start (always, even if context is restored)
+  // Set initial message count based on restored messages
   useEffect(() => {
-    const startupMessage: Message = {
-      role: 'assistant',
-      content: generateStartupMessage,
-      timestamp: Date.now(),
-    };
-    setMessages((prev) => [...prev, startupMessage]);
+    setInitialMessageCount(messages.length);
   }, []);
 
-  // Separate completed messages from the initial count
+  // All completed messages to display (startup message + context messages)
   const completedMessages = useMemo(() => {
-    // If messages is empty, return empty array
-    if (messages.length === 0) return [];
-    return messages.slice(initialMessageCount);
-  }, [messages, initialMessageCount]);
+    if (process.env.GALDR_VERBOSE === '1') {
+      verboseLogger.log(`[completedMessages] messages.length=${messages.length}, initialMessageCount=${initialMessageCount}`);
+    }
+
+    // Always prepend the startup message to the display
+    return [startupMessage, ...messages];
+  }, [messages, initialMessageCount, startupMessage]);
 
   // Keep only recent history to avoid performance issues (last 50 messages)
   const recentHistory = useMemo(() => {
@@ -86,16 +81,24 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
 
   // Memoize the rendered history items to prevent Static from re-rendering
   const historyItems = useMemo(
-    () =>
-      recentHistory.map((msg) => (
-        <OutputItem 
-          key={msg.timestamp} 
-          message={msg} 
+    () => {
+      if (process.env.GALDR_VERBOSE === '1') {
+        verboseLogger.log(`[historyItems] recentHistory.length=${recentHistory.length}`);
+        recentHistory.forEach((msg, idx) => {
+          verboseLogger.log(`  [${idx}] role=${msg.role}, content=${msg.content.substring(0, 50)}...`);
+        });
+      }
+
+      return recentHistory.map((msg) => (
+        <OutputItem
+          key={msg.timestamp}
+          message={msg}
           currentProvider={currentProvider}
           switchMode={switchMode}
           initialMessageCount={initialMessageCount}
         />
-      )),
+      ));
+    },
     [recentHistory, currentProvider, switchMode, initialMessageCount]
   );
 
@@ -174,7 +177,17 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         setNotifications([{ type: 'info', message: 'Cancelling current operation...' }]);
         abortController.abort();
         setIsLoading(false);
-        setPendingMessage(null);
+
+        // Preserve the pending message content by converting it to a completed message
+        if (pendingMessage) {
+          const cancelledMessage: Message = {
+            ...pendingMessage,
+            timestamp: Date.now(),
+          };
+          setMessages((prev) => [...prev, cancelledMessage]);
+          setPendingMessage(null);
+        }
+
         setAbortController(new AbortController());
       } else if (showSessionSelector) {
         // Exit session selector
@@ -478,9 +491,11 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
 
     if (newVerbose) {
       process.env.GALDR_VERBOSE = '1';
-      setNotifications([{ type: 'success', message: 'Verbose mode enabled for this session' }]);
+      verboseLogger.enable();
+      setNotifications([{ type: 'success', message: `Verbose mode enabled. Logs will be written to: ${verboseLogger.getLogFilePath()}` }]);
     } else {
       delete process.env.GALDR_VERBOSE;
+      verboseLogger.disable();
       setNotifications([{ type: 'success', message: 'Verbose mode disabled' }]);
     }
   };
@@ -674,9 +689,6 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
 
     // Use local variables to track streaming state
     let accumulatedStreamItems: StreamItem[] = [];
-    let currentTextBuffer = ''; // Buffer for current text segment
-    let lastUpdate = Date.now();
-    const THROTTLE_MS = 16; // ~60fps
     let messageTimestampCounter = Date.now(); // Ensure unique timestamps for split messages
     let lastSavedContent = ''; // Track last saved content to avoid redundant saves
 
@@ -706,14 +718,10 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
       }
     };
 
-    // Helper to update pending message (throttled)
+    // Helper to update pending message
     const updatePendingMessage = async () => {
-      const now = Date.now();
-      if (now - lastUpdate < THROTTLE_MS) return;
-      lastUpdate = now;
-
       const currentContent = getFullTextContent();
-      
+
       // Save completed content to context
       if (currentContent && currentContent !== lastSavedContent) {
         await saveCompletedContent(currentContent);
@@ -728,28 +736,26 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
       });
     };
 
+
+
     // Create InkWriter callbacks
     let currentToolId = 0;
     const writerCallbacks: InkWriterCallbacks = {
       onTextChunk: async (chunk: string) => {
-        currentTextBuffer += chunk;
-
         // Update or create text item in stream
         const lastItem = accumulatedStreamItems[accumulatedStreamItems.length - 1];
         if (lastItem && lastItem.type === 'text') {
-          // Update existing text item
-          lastItem.text = currentTextBuffer;
+          // Append to existing text item
+          lastItem.text = (lastItem.text || '') + chunk;
         } else {
           // Create new text item
-          accumulatedStreamItems.push({ type: 'text' as const, text: currentTextBuffer });
+          accumulatedStreamItems.push({ type: 'text' as const, text: chunk });
         }
 
+        // Update the pending message immediately
         await updatePendingMessage();
       },
       onToolUse: async (name: string, parameters?: any) => {
-        // Start a new text buffer for text after this tool
-        currentTextBuffer = '';
-
         const toolId = `tool-${currentToolId++}`;
         const toolInfo: ToolInfo = { id: toolId, name, parameters, status: 'running' };
         const newItem = { type: 'tool' as const, tool: toolInfo };
@@ -772,9 +778,6 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         await updatePendingMessage();
       },
       onInfo: async (message: string) => {
-        // Start a new text buffer for text after this info
-        currentTextBuffer = '';
-
         const newItem = { type: 'info' as const, info: message };
         accumulatedStreamItems.push(newItem);
 
@@ -830,16 +833,37 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         streamItems: accumulatedStreamItems.length > 0 ? accumulatedStreamItems : undefined,
       };
 
+      // Debug logging to track message completion
+      if (process.env.GALDR_VERBOSE === '1') {
+        verboseLogger.log(`=== MESSAGE COMPLETION DEBUG ===`);
+        verboseLogger.log(`Stream items count: ${accumulatedStreamItems.length}`);
+        verboseLogger.log(`Final text content length: ${finalTextContent.length}`);
+        verboseLogger.log(`Tools count: ${tools.length}`);
+        verboseLogger.log(`Content preview (first 500 chars): ${finalTextContent.substring(0, 500)}`);
+        verboseLogger.log(`Content preview (last 500 chars): ${finalTextContent.substring(Math.max(0, finalTextContent.length - 500))}`);
+        verboseLogger.log(`STEP 1: About to add completedMessage to history`);
+        verboseLogger.log(`================================`);
+      }
+
       // Add to history and clear pending message
-      setMessages((prev) => [...prev, completedMessage]);
+      setMessages((prev) => {
+        if (process.env.GALDR_VERBOSE === '1') {
+          verboseLogger.log(`STEP 2: setMessages called, adding completed message`);
+        }
+        return [...prev, completedMessage];
+      });
+
+      if (process.env.GALDR_VERBOSE === '1') {
+        verboseLogger.log(`STEP 3: About to clear pendingMessage`);
+      }
       setPendingMessage(null);
 
       // Final save to ensure everything is persisted
       context.save();
 
-      // Handle token limit
-      if (result.tokenLimitReached) {
-        await handleTokenLimitReached(provider);
+      // Handle credit/account limit
+      if (result.usageLimitReached) {
+        await handleusageLimitReached(provider);
       } else {
         // Check round-robin mode
         const switchMode = context.getSwitchMode();
@@ -866,19 +890,19 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
       // Keep pending message visible with error notification
       setNotifications((prev) => [...prev, { type: 'error', message: result.error || 'Unknown error occurred' }]);
 
-      if (result.tokenLimitReached) {
-        await handleTokenLimitReached(provider);
+      if (result.usageLimitReached) {
+        await handleusageLimitReached(provider);
       }
     }
 
     setAbortController(new AbortController());
   };
 
-  const handleTokenLimitReached = async (provider: Provider) => {
+  const handleusageLimitReached = async (provider: Provider) => {
     const switchMode = context.getSwitchMode();
 
     if (switchMode === 'manual') {
-      setNotifications([{ type: 'error', message: 'Token limit reached. Use /switch <provider> to change providers.' }]);
+      setNotifications([{ type: 'error', message: 'Account credit limit reached. Use /switch <provider> to change providers.' }]);
       return;
     }
 
@@ -893,7 +917,7 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         const oldProvider = currentProvider;
         setCurrentProvider(nextProvider);
         context.setCurrentProvider(nextProvider);
-        setNotifications([{ type: 'provider-switch', message: 'Token limit reached', from: oldProvider, to: nextProvider }]);
+        setNotifications([{ type: 'provider-switch', message: 'Account credit limit reached', from: oldProvider, to: nextProvider }]);
         return;
       }
 
@@ -990,7 +1014,7 @@ export class ChatSessionInk {
       // Try to find an available provider
       const available = await this.findAvailableProvider();
       if (!available) {
-        console.error('No AI providers available. Please install Claude, Gemini, Copilot, or Cursor CLI.');
+        console.error('No AI providers available. Please configure Claude, Gemini, Copilot, or Cursor.');
         return;
       }
       this.context.setCurrentProvider(available);

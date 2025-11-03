@@ -7,6 +7,7 @@ import { ProviderManager } from './providers/index.js';
 import { Provider, SwitchMode } from './types/index.js';
 import { ChatSessionInk } from './chat/session-ink.js';
 import { UserConfigManager } from './config/userConfig.js';
+import { verboseLogger } from './utils/logger.js';
 
 const program = new Command();
 
@@ -45,6 +46,8 @@ async function handleChatAction(prompt: string | undefined, options: any) {
   // Set verbose mode for this session only (not persisted)
   if (options.verbose) {
     process.env.GALDR_VERBOSE = '1';
+    verboseLogger.enable();
+    console.log(chalk.blue(`Verbose mode enabled. Logs will be written to: ${verboseLogger.getLogFilePath()}`));
   }
 
   // If a session is specified, switch to it (or create it if it doesn't exist)
@@ -135,7 +138,7 @@ program
   .option('--set-default-model <provider> <model>', 'Set default model for a provider in user config')
   .option('--set-key <provider> <key>', 'Set API key for a provider in user config')
   .option('--show-config-file', 'Show the path to the user config file')
-  .action(async (options) => {
+  .action(async (options, command) => {
     const context = new ContextManager();
     const userConfig = new UserConfigManager();
 
@@ -167,11 +170,19 @@ program
       }
       console.log(chalk.blue('\nAPI Keys:'));
       console.log(`  deepseek: ${userConfig.getApiKey('deepseek') ? '***set***' : 'not set'}`);
+      console.log(`  googleSearch: ${userConfig.getApiKey('googleSearch') ? '***set***' : 'not set'}`);
       return;
     }
 
     if (options.setKey) {
-      const [provider, key] = options.setKey;
+      const provider = options.setKey;
+      const key = command.args[0];
+      
+      if (!key) {
+        console.log(chalk.red('Missing API key. Usage: galdr config --set-key <provider> <key>'));
+        return;
+      }
+      
       if (provider !== 'deepseek') {
         console.log(chalk.red('Currently only "deepseek" provider supports API keys'));
         return;
@@ -204,13 +215,38 @@ program
     }
 
     if (options.setDefaultModel) {
-      const [provider, model] = options.setDefaultModel;
+      const provider = options.setDefaultModel;
+      const model = command.args[0];
+      
+      if (!model) {
+        console.log(chalk.red('Missing model. Usage: galdr config --set-default-model <provider> <model>'));
+        return;
+      }
+      
       if (!['claude', 'gemini', 'copilot', 'deepseek', 'cursor'].includes(provider)) {
         console.log(chalk.red('Invalid provider. Must be: claude, gemini, copilot, deepseek, or cursor'));
         return;
       }
       userConfig.setDefaultModel(provider as Provider, model);
       console.log(chalk.green(`Default model for ${provider} set to: ${model}`));
+      return;
+    }
+
+    if (options.model) {
+      const provider = options.model;
+      const model = command.args[0];
+      
+      if (!model) {
+        console.log(chalk.red('Missing model. Usage: galdr config --model <provider> <model>'));
+        return;
+      }
+      
+      if (!['claude', 'gemini', 'copilot', 'deepseek', 'cursor'].includes(provider)) {
+        console.log(chalk.red('Invalid provider. Must be: claude, gemini, copilot, deepseek, or cursor'));
+        return;
+      }
+      context.setProviderModel(provider as Provider, model);
+      console.log(chalk.green(`Session model for ${provider} set to: ${model}`));
       return;
     }
 

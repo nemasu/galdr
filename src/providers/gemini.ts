@@ -1,6 +1,5 @@
-import { ProviderResult } from '../types/index.js';
+import { ProviderResult, Message } from '../types/index.js';
 import { BaseProvider } from './base.js';
-import chalk from 'chalk';
 
 interface StreamEvent {
   type: string;
@@ -116,23 +115,55 @@ export class GeminiProvider extends BaseProvider {
     }
   }
 
-  detectTokenLimit(output: string): boolean {
-    // Check for rate limit errors (429) and resource exhaustion
+  isUsageLimitReached(output: string, httpStatus?: number): boolean {
+    // Google Gemini uses HTTP 429 for rate limits and quota limits
+    if (httpStatus === 429) {
+      return true;
+    }
+    
+    // Also check for Gemini-specific session limit and quota error messages
     const errorPatterns = [
       /Session limit reached/i,
-      //TODO figure out the actual messages and add them here
+      /quota.*exceeded/i,
+      /billing.*limit/i,
     ];
 
     if (process.env.GALDR_VERBOSE) {
-      this.showVerbose(`Gemini detectTokenLimit checking output length: ${output.length}`);
+      this.showVerbose(`Gemini isUsageLimitReached checking output length: ${output.length}`);
       const matched = errorPatterns.find((pattern) => pattern.test(output));
       if (matched) {
-        this.showVerbose(`Gemini token limit detected with pattern: ${matched}`);
+        this.showVerbose(`Gemini usage limit detected with pattern: ${matched}`);
       } else {
-        this.showVerbose(`Gemini no token limit pattern matched`);
+        this.showVerbose(`Gemini no usage limit pattern matched`);
       }
     }
 
     return errorPatterns.some((pattern) => pattern.test(output));
+  }
+
+  public async execute(
+    prompt: string, 
+    conversationHistory: Message[] = [], 
+    onStream?: (chunk: string) => void, 
+    onFirstChunk?: () => void, 
+    signal?: AbortSignal
+  ): Promise<ProviderResult> {
+    // Call the base execute method
+    const result = await super.execute(prompt, conversationHistory, onStream, onFirstChunk, signal);
+    
+    // Check for context limits in the error output
+    if (!result.success && result.error) {
+      const contextLimitReached = this.detectContextLimit(result.error);
+      
+      if (contextLimitReached) {
+        // Update the error to indicate it's a context limit issue
+        return {
+          ...result,
+          error: `Context limit exceeded: ${result.error}`,
+        };
+      }
+    }
+    
+    return result;
   }
 }

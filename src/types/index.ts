@@ -48,5 +48,5 @@ export interface ProviderResult {
   success: boolean;
   response?: string;
   error?: string;
-  tokenLimitReached?: boolean;
+  usageLimitReached?: boolean;
 }

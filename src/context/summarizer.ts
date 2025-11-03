@@ -32,7 +32,7 @@ export class MessageSummarizer {
     const provider = await this.getFirstAvailableProvider();
 
     if (!provider) {
-      throw new Error('Unable to summarize: No LLM provider available. Please install one of: claude, gemini, copilot, or cursor CLI tools.');
+      throw new Error('Unable to summarize: No LLM provider available. Please configure one of: claude, gemini, copilot, or cursor.');
     }
 
     try {

@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { Provider, ProviderResult, Message } from '../types/index.js';
 import chalk from 'chalk';
 import { InkWriter } from '../chat/utils/InkWriter.js';
+import { verboseLogger } from '../utils/logger.js';
 
 export abstract class BaseProvider {
   protected name: Provider;
@@ -18,7 +19,23 @@ export abstract class BaseProvider {
 
   abstract parseOutput(output: string): ProviderResult;
 
-  abstract detectTokenLimit(output: string): boolean;
+  abstract isUsageLimitReached(output: string, httpStatus?: number): boolean;
+
+  protected detectContextLimit(output: string): boolean {
+    // Base implementation - providers can override this
+    // Check for common context length limit patterns
+    return output.includes('context_length_exceeded') || 
+           output.includes('maximum context length') ||
+           output.includes('context window') ||
+           output.includes('tokens') && output.includes('exceeded') ||
+           output.includes('too many tokens') ||
+           output.includes('token limit') ||
+           output.includes('context limit') ||
+           output.includes('prompt') && output.includes('too long') ||
+           output.includes('input') && output.includes('too long') ||
+           output.includes('exceeds') && output.includes('maximum') && output.includes('tokens') ||
+           output.includes('maximum') && output.includes('token') && output.includes('limit');
+  }
 
   // Optional method for providers to handle streaming chunks
   protected handleStreamChunk(chunk: string): void {
@@ -40,14 +57,10 @@ export abstract class BaseProvider {
     return !hiddenTools.includes(toolName);
   }
 
-  // Helper method to show verbose messages inline with output
+  // Helper method to show verbose messages to file instead of screen
   protected showVerbose(message: string): void {
-    if (this.inkWriter) {
-      this.inkWriter.showInfo(`[VERBOSE] ${message}`);
-    } else {
-      // Fallback to console.error if InkWriter is not available
-      console.error(chalk.dim(`[VERBOSE] ${message}`));
-    }
+    // Log to file instead of showing on screen
+    verboseLogger.log(message);
   }
 
   protected handleChildProcess(
@@ -158,7 +171,7 @@ export abstract class BaseProvider {
         resolve({
           success: false,
           error: 'Operation cancelled',
-          tokenLimitReached: false,
+          usageLimitReached: false,
         });
         return;
       }
@@ -168,16 +181,16 @@ export abstract class BaseProvider {
         resolve({
           success: false,
           error: stderr || `Command exited with code ${code}`,
-          tokenLimitReached: this.detectTokenLimit(combinedOutput),
+          usageLimitReached: this.isUsageLimitReached(combinedOutput),
         });
         return;
       }
       const result = this.parseOutput(stdout);
       const combinedOutput = stdout + stderr;
-      result.tokenLimitReached = this.detectTokenLimit(combinedOutput);
+      result.usageLimitReached = this.isUsageLimitReached(combinedOutput);
       if (process.env.GALDR_VERBOSE) {
         this.showVerbose(`Parsed response length: ${result.response?.length || 0} characters`);
-        this.showVerbose(`Token limit reached: ${result.tokenLimitReached}`);
+        this.showVerbose(`Credit limit reached: ${result.usageLimitReached}`);
       }
       resolve(result);
     });
@@ -190,7 +203,7 @@ export abstract class BaseProvider {
       resolve({
         success: false,
         error: `Failed to execute command: ${error.message}`,
-        tokenLimitReached: false,
+        usageLimitReached: false,
       });
     });
   }

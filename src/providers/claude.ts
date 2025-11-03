@@ -130,7 +130,7 @@ export class ClaudeProvider extends BaseProvider {
     }
   }
 
-  detectTokenLimit(output: string): boolean {
+  isUsageLimitReached(output: string, httpStatus?: number): boolean {
     // Check for actual error messages and JSON error flags
     const errorPatterns = [
       // Claude CLI specific session limit message
@@ -153,4 +153,5 @@ export class ClaudeProvider extends BaseProvider {
 
     return matched;
   }
+
 }
