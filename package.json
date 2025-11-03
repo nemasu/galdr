@@ -1,6 +1,6 @@
 {
   "name": "@nemasu/galdr",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "CLI tool that combines multiple AI coding assistants (Claude, Gemini, Copilot, DeepSeek API, Cursor)",
   "keywords": [
     "cli",
