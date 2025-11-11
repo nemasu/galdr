@@ -31,7 +31,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-tokenizer.js",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "jest",
@@ -39,6 +39,7 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.7.6",
     "@mozilla/readability": "^0.6.0",
     "@types/jsdom": "^27.0.0",
     "chalk": "^4.1.2",

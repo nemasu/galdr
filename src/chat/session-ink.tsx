@@ -931,7 +931,7 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
 
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height="100%">
       {/* Session selector overlay */}
       {showSessionSelector && (
         <SessionSelector
@@ -945,7 +945,7 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
           isActive={showSessionSelector}
         />
       )}
-      
+
       {/* New session dialog */}
       {showNewSessionDialog && (
         <NewSessionDialog
@@ -968,7 +968,7 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
       )}
 
       {/* Main output area - displays all messages, tools, and notifications */}
-      <Box flexGrow={1} flexShrink={1} flexDirection="column" overflow="hidden">
+      <Box flexGrow={1} flexShrink={1} flexDirection="column">
         <ContentArea
           currentProvider={currentProvider}
           switchMode={switchMode}

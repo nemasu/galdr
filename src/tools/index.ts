@@ -20,6 +20,7 @@ export interface ToolDefinition {
       type: 'object';
       properties: Record<string, any>;
       required: string[];
+      additionalProperties?: boolean;
     };
   };
 }
@@ -50,7 +51,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'The absolute path to the file to read'
             }
           },
-          required: ['file_path']
+          required: ['file_path'],
+          additionalProperties: false
         }
       }
     },
@@ -71,7 +73,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'The content to write to the file'
             }
           },
-          required: ['file_path', 'content']
+          required: ['file_path', 'content'],
+          additionalProperties: false
         }
       }
     },
@@ -100,7 +103,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'If true, replace all occurrences. If false, replace only the first occurrence. Defaults to false.'
             }
           },
-          required: ['file_path', 'old_string', 'new_string']
+          required: ['file_path', 'old_string', 'new_string'],
+          additionalProperties: false
         }
       }
     },
@@ -121,7 +125,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'If true, list files recursively in subdirectories. Defaults to false.'
             }
           },
-          required: ['directory_path']
+          required: ['directory_path'],
+          additionalProperties: false
         }
       }
     },
@@ -150,7 +155,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'If true, search is case-sensitive. Defaults to false.'
             }
           },
-          required: ['directory_path', 'pattern']
+          required: ['directory_path', 'pattern'],
+          additionalProperties: false
         }
       }
     },
@@ -171,7 +177,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'Optional timeout in milliseconds. Defaults to 30000 (30 seconds).'
             }
           },
-          required: ['command']
+          required: ['command'],
+          additionalProperties: false
         }
       }
     },
@@ -208,7 +215,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'Maximum number of results to return. Defaults to 100.'
             }
           },
-          required: ['pattern']
+          required: ['pattern'],
+          additionalProperties: false
         }
       }
     },
@@ -233,7 +241,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'Maximum number of file paths to return. Defaults to 200.'
             }
           },
-          required: ['pattern']
+          required: ['pattern'],
+          additionalProperties: false
         }
       }
     },
@@ -258,7 +267,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'The index of the first result to return (for pagination). Defaults to 1.'
             }
           },
-          required: ['query']
+          required: ['query'],
+          additionalProperties: false
         }
       }
     },
@@ -279,7 +289,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'If true, includes the cleaned HTML content in addition to plain text. Defaults to false.'
             }
           },
-          required: ['url']
+          required: ['url'],
+          additionalProperties: false
         }
       }
     },
@@ -304,7 +315,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'Region for search results (e.g., "us-en", "uk-en", "de-de"). Defaults to "wt-wt" (worldwide).'
             }
           },
-          required: ['query']
+          required: ['query'],
+          additionalProperties: false
         }
       }
     },
@@ -325,7 +337,8 @@ export function getToolDefinitions(): ToolDefinition[] {
               description: 'Optional format for the date output. Options: "iso", "local", "utc", "full". Defaults to "full" which shows multiple formats.'
             }
           },
-          required: []
+          required: [],
+          additionalProperties: false
         }
       }
     }
