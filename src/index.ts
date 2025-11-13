@@ -8,13 +8,17 @@ import { Provider, SwitchMode } from './types/index.js';
 import { ChatSessionInk } from './chat/session-ink.js';
 import { UserConfigManager } from './config/userConfig.js';
 import { verboseLogger } from './utils/logger.js';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const packageJson = require('../package.json');
 
 const program = new Command();
 
 program
   .name('galdr')
   .description('Combine multiple AI coding assistants (Claude, Gemini, Copilot, DeepSeek API, Cursor)')
-  .version('0.1.0')
+  .version(packageJson.version)
   .option('--list-sessions', 'List all available sessions')
   .option('-s, --session <name>', 'Start in a named session (creates it if it does not exist)');
 
