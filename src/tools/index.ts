@@ -797,7 +797,6 @@ async function executeBash(
 
 /**
  * Gets the current date and time
- * *** RECOMMENDED FIX APPLIED ***
  */
 async function executeGetCurrentDate(
   timezone?: string,
