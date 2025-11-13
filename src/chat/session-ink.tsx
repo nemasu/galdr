@@ -1014,7 +1014,7 @@ export class ChatSessionInk {
       // Try to find an available provider
       const available = await this.findAvailableProvider();
       if (!available) {
-        console.error('No AI providers available. Please configure Claude, Gemini, Copilot, or Cursor.');
+        console.error('No AI providers available. Please configure Claude, Gemini, Copilot, Cursor, or set a DeepSeek API key.');
         return;
       }
       this.context.setCurrentProvider(available);
@@ -1032,7 +1032,7 @@ export class ChatSessionInk {
   }
 
   private async findAvailableProvider(): Promise<Provider | null> {
-    const providers: Provider[] = ['claude', 'gemini', 'copilot', 'cursor'];
+    const providers: Provider[] = ['claude', 'gemini', 'copilot', 'cursor', 'deepseek'];
     for (const provider of providers) {
       const available = await this.providerManager.checkAvailability(provider);
       if (available) {
