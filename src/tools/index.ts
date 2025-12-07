@@ -368,6 +368,55 @@ async function executeWriteFile(
   }
 }
 
+/**
+ * Helper function to visualize whitespace in a string for debugging
+ */
+function visualizeWhitespace(str: string, maxLength: number = 100): string {
+  return str
+    .substring(0, maxLength)
+    .replace(/\t/g, '⇥')
+    .replace(/\r/g, '␍')
+    .replace(/\n/g, '␊\n')
+    .replace(/ /g, '·');
+}
+
+/**
+ * Helper function to find the best partial match and explain the difference
+ */
+function findBestMatchAndExplain(content: string, oldString: string): string {
+  // Normalize line endings for comparison
+  const normalizedContent = content.replace(/\r\n/g, '\n');
+  const normalizedOld = oldString.replace(/\r\n/g, '\n');
+
+  // Try normalized match
+  if (normalizedContent.includes(normalizedOld)) {
+    return `String found after normalizing line endings (\\r\\n vs \\n). The file uses different line endings than your search string.`;
+  }
+
+  // Split into lines and try to find similar content
+  const contentLines = content.split('\n');
+  const oldLines = oldString.split('\n');
+  const firstOldLine = oldLines[0]?.trim();
+
+  if (firstOldLine && firstOldLine.length > 5) {
+    // Find lines that contain similar content
+    for (let i = 0; i < contentLines.length; i++) {
+      if (contentLines[i].includes(firstOldLine)) {
+        const contextStart = Math.max(0, i - 1);
+        const contextEnd = Math.min(contentLines.length, i + oldLines.length + 1);
+        const context = contentLines.slice(contextStart, contextEnd).join('\n');
+
+        return `String not found, but similar content found near line ${i + 1}:\n\n` +
+               `Expected whitespace:\n${visualizeWhitespace(oldString, 200)}\n\n` +
+               `Actual content in file:\n${visualizeWhitespace(context, 200)}\n\n` +
+               `Hint: Check for tab vs space differences (⇥=tab, ·=space)`;
+      }
+    }
+  }
+
+  return `String not found in file. First 100 chars of search string (whitespace visualized):\n${visualizeWhitespace(oldString, 100)}`;
+}
+
 async function executeEditFile(
   filePath: string,
   oldString: string,
@@ -392,7 +441,8 @@ async function executeEditFile(
 
     // Check if old_string exists in the file
     if (!content.includes(oldString)) {
-      throw new Error(`String not found in file: ${oldString.substring(0, 100)}`);
+      const explanation = findBestMatchAndExplain(content, oldString);
+      throw new Error(explanation);
     }
 
     // Perform replacement
@@ -407,7 +457,8 @@ async function executeEditFile(
       occurrences = 1;
       const index = content.indexOf(oldString);
       if (index === -1) {
-        throw new Error(`String not found in file: ${oldString.substring(0, 100)}`);
+        const explanation = findBestMatchAndExplain(content, oldString);
+        throw new Error(explanation);
       }
       newContent = content.substring(0, index) + newString + content.substring(index + oldString.length);
     }

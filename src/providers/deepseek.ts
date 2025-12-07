@@ -12,13 +12,13 @@ interface DeepSeekMessage {
   role: "system" | "user" | "assistant" | "tool";
   content:
     | string
-    | Array<{
+    | Array<{ 
         type: string;
         text?: string;
         tool_use_id?: string;
         content?: string;
       }>;
-  tool_calls?: Array<{
+  tool_calls?: Array<{ 
     id: string;
     type: "function";
     function: {
@@ -27,6 +27,7 @@ interface DeepSeekMessage {
     };
   }>;
   tool_call_id?: string;
+  reasoning_content?: string;
 }
 
 interface DeepSeekRequest {
@@ -34,7 +35,7 @@ interface DeepSeekRequest {
   messages: DeepSeekMessage[];
   stream: boolean;
   tool_choice: "none" | "auto" | "required";
-  temperature: number;
+  temperature?: number; // Optional - not supported by deepseek-reasoner
   max_tokens?: number;
   tools?: Array<ToolDefinition & { strict?: boolean }>;
 }
@@ -44,11 +45,12 @@ interface DeepSeekStreamChunk {
   object: string;
   created: number;
   model: string;
-  choices: Array<{
+  choices: Array<{ 
     delta: {
       content?: string;
+      reasoning_content?: string;
       role?: string;
-      tool_calls?: Array<{
+      tool_calls?: Array<{ 
         index: number;
         id?: string;
         type?: "function";
@@ -65,7 +67,7 @@ interface DeepSeekStreamChunk {
 
 export class DeepSeekProvider extends BaseProvider {
   private apiKey: string | undefined;
-  private baseUrl: string = "https://api.deepseek.com/beta";
+  private baseUrl: string = "https://api.deepseek.com/";
   private configManager: UserConfigManager;
 
   constructor() {
@@ -107,10 +109,15 @@ export class DeepSeekProvider extends BaseProvider {
   }
 
   private convertMessages(messages: Message[]): DeepSeekMessage[] {
-    return messages.map((msg) => ({
-      role: msg.role as "system" | "user" | "assistant",
-      content: msg.content,
-    }));
+    return messages.map((msg) => {
+      const converted: DeepSeekMessage = {
+        role: msg.role as "system" | "user" | "assistant",
+        content: msg.content,
+      };
+      // Strip reasoning_content from conversation history for multi-turn conversations
+      // as per deepseek-reasoner documentation
+      return converted;
+    });
   }
 
   private trimConversationHistory(
@@ -133,7 +140,9 @@ export class DeepSeekProvider extends BaseProvider {
     let currentTokens = tokenizer.quickEstimateMessages(messages);
 
     if (process.env.GALDR_VERBOSE) {
-      this.showVerbose(`Trimming: Current tokens: ${currentTokens}, Max: ${MAX_CONTEXT_TOKENS}`);
+      this.showVerbose(
+        `Trimming: Current tokens: ${currentTokens}, Max: ${MAX_CONTEXT_TOKENS}`
+      );
     }
 
     // If we're under the limit, no need to trim
@@ -155,7 +164,9 @@ export class DeepSeekProvider extends BaseProvider {
       currentTokens = tokenizer.quickEstimateMessages(testMessages);
 
       if (process.env.GALDR_VERBOSE) {
-        this.showVerbose(`  Removed 1 message, now ${trimmedConversation.length} messages, ${currentTokens} tokens`);
+        this.showVerbose(
+          `  Removed 1 message, now ${trimmedConversation.length} messages, ${currentTokens} tokens`
+        );
       }
 
       // If we're under the limit, we're done
@@ -176,17 +187,20 @@ export class DeepSeekProvider extends BaseProvider {
     retryCount: number = 0
   ): Promise<ProviderResult> {
     // Add strict: true to all tool definitions for strict mode
-    const tools = getToolDefinitions().map(tool => ({
+    const tools = getToolDefinitions().map((tool) => ({
       ...tool,
-      strict: true
+      strict: true,
     }));
+
+    // deepseek-reasoner does not support temperature parameter
+    const isReasonerModel = model === "deepseek-reasoner";
 
     const request: DeepSeekRequest = {
       model,
       messages,
       stream: true,
       tool_choice: "auto",
-      temperature: 0,
+      ...(!isReasonerModel && { temperature: 0 }), // Only add temperature for non-reasoner models
       max_tokens: 8192, // Set a reasonable limit to prevent excessive reasoning
       tools,
     };
@@ -194,7 +208,7 @@ export class DeepSeekProvider extends BaseProvider {
     if (process.env.GALDR_VERBOSE) {
       // Calculate token estimates
       const tokenEstimate = tokenizer.quickEstimateMessages(messages);
-      const toolsTokenEstimate = request.tools 
+      const toolsTokenEstimate = request.tools
         ? tokenizer.quickEstimate(JSON.stringify(request.tools))
         : 0;
       const totalTokenEstimate = tokenEstimate + toolsTokenEstimate;
@@ -202,7 +216,9 @@ export class DeepSeekProvider extends BaseProvider {
       this.showVerbose(`========== DEEPSEEK API REQUEST ==========`);
       this.showVerbose(`Model: ${model}`);
       this.showVerbose(`Messages count: ${messages.length}`);
-      this.showVerbose(`Estimated tokens: ${totalTokenEstimate} (messages: ${tokenEstimate}, tools: ${toolsTokenEstimate})`);
+      this.showVerbose(
+        `Estimated tokens: ${totalTokenEstimate} (messages: ${tokenEstimate}, tools: ${toolsTokenEstimate})`
+      );
       this.showVerbose(`Request body: ${JSON.stringify(request, null, 2)}`);
       this.showVerbose(`========================================`);
     }
@@ -313,15 +329,25 @@ export class DeepSeekProvider extends BaseProvider {
         if (response.status === 404 && retryCount < 3) {
           const delayMs = Math.pow(2, retryCount) * 1000; // Exponential backoff: 1s, 2s, 4s
           if (process.env.GALDR_VERBOSE) {
-            this.showVerbose(`⚠️  Received 404 Not Found (attempt ${retryCount + 1}/3)`);
-            this.showVerbose(`   This may be intermittent. Retrying in ${delayMs}ms...`);
+            this.showVerbose(
+              `⚠️  Received 404 Not Found (attempt ${retryCount + 1}/3)`
+            );
+            this.showVerbose(
+              `   This may be intermittent. Retrying in ${delayMs}ms...`
+            );
           }
 
           // Wait before retrying
-          await new Promise(resolve => setTimeout(resolve, delayMs));
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
 
           // Retry with incremented count
-          return this.streamResponse(messages, model, onStream, signal, retryCount + 1);
+          return this.streamResponse(
+            messages,
+            model,
+            onStream,
+            signal,
+            retryCount + 1
+          );
         }
 
         // If context limit is reached and we have conversation history, try trimming
@@ -371,6 +397,7 @@ export class DeepSeekProvider extends BaseProvider {
       }
 
       let fullResponse = "";
+      let fullReasoningContent = "";
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -482,8 +509,17 @@ export class DeepSeekProvider extends BaseProvider {
                 const chunk: DeepSeekStreamChunk = JSON.parse(jsonStr);
                 const delta = chunk.choices[0]?.delta;
                 const content = delta?.content;
+                const reasoningContent = delta?.reasoning_content;
                 const toolCallDeltas = delta?.tool_calls;
                 const finishReason = chunk.choices[0]?.finish_reason;
+
+                // Handle reasoning content (for deepseek-reasoner)
+                if (reasoningContent) {
+                  fullReasoningContent += reasoningContent;
+                  // Display reasoning content to user during streaming
+                  // This shows the model's chain-of-thought process
+                  this.handleStreamChunk(reasoningContent);
+                }
 
                 if (content) {
                   fullResponse += content;
@@ -494,12 +530,15 @@ export class DeepSeekProvider extends BaseProvider {
                     onStream(content);
                   }
                   this.handleStreamChunk(content);
-                } else {
-                  // Track empty chunks
+                } else if (!reasoningContent) {
+                  // Only track as empty if we didn't get reasoning content either
                   emptyChunkStreakCount++;
 
                   // Warn if we're getting too many consecutive empty chunks
-                  if (emptyChunkStreakCount === 100 && process.env.GALDR_VERBOSE) {
+                  if (
+                    emptyChunkStreakCount === 100 &&
+                    process.env.GALDR_VERBOSE
+                  ) {
                     this.showVerbose(
                       `Received 100 consecutive empty chunks. DeepSeek may be doing internal reasoning. Total chunks: ${chunkCount}, content chunks: ${contentfulChunkCount}`
                     );
@@ -517,8 +556,11 @@ export class DeepSeekProvider extends BaseProvider {
                       if (
                         currentToolCall &&
                         currentToolCall.id &&
-                        currentToolCall.name
+                        currentToolCall.id.trim() &&
+                        currentToolCall.name &&
+                        currentToolCall.name.trim()
                       ) {
+                        
                         toolCalls.push({
                           id: currentToolCall.id,
                           name: currentToolCall.name,
@@ -593,39 +635,77 @@ export class DeepSeekProvider extends BaseProvider {
         ) {
           // Output detailed termination information
           if (process.env.GALDR_VERBOSE) {
-            this.showVerbose("\n═══════════════════════════════════════════════════════════════");
+            this.showVerbose(
+              "\n═══════════════════════════════════════════════════════════════"
+            );
             this.showVerbose("DeepSeek API Stream Termination Error");
-            this.showVerbose("═══════════════════════════════════════════════════════════════");
+            this.showVerbose(
+              "═══════════════════════════════════════════════════════════════"
+            );
             this.showVerbose(`Error Message: ${error.message}`);
             this.showVerbose(`Error Type: ${error.name || "Unknown"}`);
-            this.showVerbose(`Error Stack: ${error.stack || "No stack trace available"}`);
-            this.showVerbose("───────────────────────────────────────────────────────────────");
+            this.showVerbose(
+              `Error Stack: ${error.stack || "No stack trace available"}`
+            );
+            this.showVerbose(
+              "───────────────────────────────────────────────────────────────"
+            );
             this.showVerbose("Request Details:");
             this.showVerbose(`  Model: ${this.model}`);
             this.showVerbose(`  API URL: ${this.baseUrl}`);
             this.showVerbose(`  Messages Count: ${messages.length}`);
-            this.showVerbose(`  Last Message Role: ${messages[messages.length - 1]?.role || "N/A"}`);
-            this.showVerbose(`  Last Message Length: ${messages[messages.length - 1]?.content?.length || 0}`);
-            this.showVerbose("───────────────────────────────────────────────────────────────");
+            this.showVerbose(
+              `  Last Message Role: ${ 
+                messages[messages.length - 1]?.role || "N/A"
+              }`
+            );
+            this.showVerbose(
+              `  Last Message Length: ${ 
+                messages[messages.length - 1]?.content?.length || 0
+              }`
+            );
+            this.showVerbose(
+              "───────────────────────────────────────────────────────────────"
+            );
             this.showVerbose("Response State:");
-            this.showVerbose(`  Partial Response Received: ${fullResponse.length > 0 ? "Yes" : "No"}`);
-            this.showVerbose(`  Partial Response Length: ${fullResponse.length} characters`);
+            this.showVerbose(
+              `  Partial Response Received: ${ 
+                fullResponse.length > 0 ? "Yes" : "No"
+              }`
+            );
+            this.showVerbose(
+              `  Partial Response Length: ${fullResponse.length} characters`
+            );
             this.showVerbose(`  Tool Calls Collected: ${toolCalls.length}`);
-            this.showVerbose(`  Current Buffer: ${buffer ? `"${buffer.substring(0, 100)}${buffer.length > 100 ? "..." : ""}"` : "Empty"}`);
-            this.showVerbose("───────────────────────────────────────────────────────────────");
+            this.showVerbose(
+              `  Current Buffer: ${ 
+                buffer
+                  ? `"${buffer.substring(0, 100)}${ 
+                      buffer.length > 100 ? "..." : ""
+                    }"`
+                  : "Empty"
+              }`
+            );
+            this.showVerbose(
+              "───────────────────────────────────────────────────────────────"
+            );
             this.showVerbose("Possible Causes:");
             this.showVerbose("  • Network connectivity issues");
             this.showVerbose("  • DeepSeek API rate limiting");
             this.showVerbose("  • Server-side timeout or overload");
             this.showVerbose("  • Request payload too large");
             this.showVerbose("  • API key issues");
-            this.showVerbose("═══════════════════════════════════════════════════════════════");
+            this.showVerbose(
+              "═══════════════════════════════════════════════════════════════"
+            );
           }
 
           // If we have a partial response, return it
           if (fullResponse.length > 0) {
             if (process.env.GALDR_VERBOSE) {
-              this.showVerbose(`⚠️  Returning partial response (${fullResponse.length} characters)`);
+              this.showVerbose(
+                `⚠️  Returning partial response (${fullResponse.length} characters)`
+              );
             }
             return {
               success: true,
@@ -651,9 +731,13 @@ export class DeepSeekProvider extends BaseProvider {
       // Execute tool calls if any
       if (toolCalls.length > 0) {
         if (process.env.GALDR_VERBOSE) {
-          const toolCallsTokenEstimate = tokenizer.quickEstimate(JSON.stringify(toolCalls));
-          this.showVerbose(`Executing ${toolCalls.length} tool call(s)`);
-          this.showVerbose(`Estimated tool calls tokens: ${toolCallsTokenEstimate}`);
+          const toolCallsTokenEstimate = tokenizer.quickEstimate(
+            JSON.stringify(toolCalls)
+          );
+          this.showVerbose(`Executing ${toolCalls.length} tool call(s)`)
+          this.showVerbose(
+            `Estimated tool calls tokens: ${toolCallsTokenEstimate}`
+          );
         }
 
         // Clone messages array to avoid mutating the original
@@ -672,6 +756,10 @@ export class DeepSeekProvider extends BaseProvider {
               arguments: tc.arguments,
             },
           })),
+          // Include reasoning_content if available (will be stripped in next turn)
+          ...(fullReasoningContent && {
+            reasoning_content: fullReasoningContent,
+          }),
         };
         updatedMessages.push(assistantMessage);
 
@@ -708,17 +796,24 @@ export class DeepSeekProvider extends BaseProvider {
       if (process.env.GALDR_VERBOSE) {
         const responseTokenEstimate = tokenizer.quickEstimate(fullResponse);
         const emptyChunks = chunkCount - contentfulChunkCount;
-        const emptyChunkPercentage = chunkCount > 0 ? ((emptyChunks / chunkCount) * 100).toFixed(1) : "0";
+        const emptyChunkPercentage =
+          chunkCount > 0 ? ((emptyChunks / chunkCount) * 100).toFixed(1) : "0";
 
         this.showVerbose(`========== DEEPSEEK RESPONSE COMPLETE ==========`);
         this.showVerbose(`Response length: ${fullResponse.length} characters`);
         this.showVerbose(`Estimated response tokens: ${responseTokenEstimate}`);
-        this.showVerbose(`Total chunks: ${chunkCount}, Content chunks: ${contentfulChunkCount}, Empty: ${emptyChunks} (${emptyChunkPercentage}%)`);
+        this.showVerbose(
+          `Total chunks: ${chunkCount}, Content chunks: ${contentfulChunkCount}, Empty: ${emptyChunks} (${emptyChunkPercentage}%)`
+        );
 
         // Warn if too many empty chunks
         if (emptyChunks > 1000) {
-          this.showVerbose(`⚠️  WARNING: Received ${emptyChunks} empty chunks. This indicates DeepSeek is doing extensive internal reasoning.`);
-          this.showVerbose(`   Consider using a more specific prompt or breaking the task into smaller steps.`);
+          this.showVerbose(
+            `⚠️  WARNING: Received ${emptyChunks} empty chunks. This indicates DeepSeek is doing extensive internal reasoning.`
+          );
+          this.showVerbose(
+            `   Consider using a more specific prompt or breaking the task into smaller steps.`
+          );
         }
 
         this.showVerbose(`===============================================`);
@@ -735,43 +830,67 @@ export class DeepSeekProvider extends BaseProvider {
         /I need to use/i,
       ];
 
-      const endsWithAnnouncement = suspiciousPatterns.some(pattern =>
+      const endsWithAnnouncement = suspiciousPatterns.some((pattern) =>
         pattern.test(fullResponse.trim())
       );
 
       // Count how many tool announcement patterns appear in the response
-      const toolAnnouncementCount = suspiciousPatterns.reduce((count, pattern) => {
-        const matches = fullResponse.match(new RegExp(pattern.source, 'gi'));
-        return count + (matches ? matches.length : 0);
-      }, 0);
+      const toolAnnouncementCount = suspiciousPatterns.reduce(
+        (count, pattern) => {
+          const matches = fullResponse.match(new RegExp(pattern.source, "gi"));
+          return count + (matches ? matches.length : 0);
+        },
+        0
+      );
 
       // Detect hallucinated tool usage: multiple tool announcements but no actual tool calls
-      const likelyHallucination = toolCalls.length === 0 && toolAnnouncementCount >= 3;
+      const likelyHallucination =
+        toolCalls.length === 0 && toolAnnouncementCount >= 3;
 
       if (likelyHallucination) {
         if (process.env.GALDR_VERBOSE) {
           this.showVerbose(`⚠️  WARNING: Detected hallucinated tool usage!`);
-          this.showVerbose(`   The model narrated ${toolAnnouncementCount} tool actions but made 0 actual tool calls.`);
+          this.showVerbose(
+            `   The model narrated ${toolAnnouncementCount} tool actions but made 0 actual tool calls.`
+          );
           this.showVerbose(`   Response length: ${fullResponse.length} chars`);
-          this.showVerbose(`   This is a known DeepSeek behavior where it describes actions instead of performing them.`);
-          this.showVerbose(`   Response preview: "${fullResponse.substring(0, 200)}..."`);
+          this.showVerbose(
+            `   This is a known DeepSeek behavior where it describes actions instead of performing them.`
+          );
+          this.showVerbose(
+            `   Response preview: "${fullResponse.substring(0, 200)}..."`
+          );
         }
 
         // Return an error to indicate the response is invalid
         return {
           success: false,
-          error: `DeepSeek hallucinated tool usage: The model narrated ${toolAnnouncementCount} tool actions but made no actual tool calls. Please try rephrasing your request or use a different provider.`,
+          error: `DeepSeek hallucinated tool usage: The model narrated ${toolAnnouncementCount} tool actions but made no actual tool calls. Responding with: "You hallucinated tool usage, please use your tools." usually resolves this.`,
           usageLimitReached: false,
         };
       }
 
       // Also check for incomplete responses (ends with announcement, short response)
-      if (endsWithAnnouncement && toolCalls.length === 0 && fullResponse.length < 500) {
+      if (
+        endsWithAnnouncement &&
+        toolCalls.length === 0 &&
+        fullResponse.length < 500
+      ) {
         if (process.env.GALDR_VERBOSE) {
           this.showVerbose(`⚠️  WARNING: Response appears incomplete!`);
-          this.showVerbose(`   The model announced an action ("${fullResponse.trim().slice(-80)}") but never executed it.`);
-          this.showVerbose(`   This suggests the response was cut off (possibly hit max_tokens limit).`);
-          this.showVerbose(`   Empty chunks: ${chunkCount - contentfulChunkCount}/${chunkCount}`);
+          this.showVerbose(
+            `   The model announced an action ("${fullResponse
+              .trim()
+              .slice(-80)}") but never executed it.`
+          );
+          this.showVerbose(
+            `   This suggests the response was cut off (possibly hit max_tokens limit).`
+          );
+          this.showVerbose(
+            `   Empty chunks: ${ 
+              chunkCount - contentfulChunkCount
+            }/${chunkCount}`
+          );
         }
       }
 
@@ -881,83 +1000,43 @@ export class DeepSeekProvider extends BaseProvider {
       };
     }
 
-    // --- FIX: Build the system prompt every time ---
-
     const hasGoogleSearch = this.hasGoogleSearchKeys();
     const searchProviderInfo = hasGoogleSearch
       ? "Google Search is configured. Prefer google_search over duckduckgo_search when searching the web."
       : "Google Search is not configured. Use duckduckgo_search for web searches (no API key required).";
 
     // Combine all instructions into one system prompt
-    const systemPromptContent = `You are an interactive CLI coding assistant specializing in software engineering tasks. Your primary goal is to help users safely and efficiently, adhering strictly to the following instructions and utilizing your available tools.
+    const systemPromptContent = `You are an interactive CLI assistant powered by DeepSeek (Reasoning Model). Your goal is to help users safely and efficiently.
 
-# Core Mandates
+# Core Instructions
+1. **Act, Don't Narrate:** ERROR on side of action. Do not say "I will read...", just call the tool. Do not say "I will search...", just call the tool.
+2. **No Hallucinations:** You have real tools. Use them. Never invent tool outputs or claim to have taken actions you didn't via tool calls.
+3. **Code Quality:** Match existing project style and conventions. Verify changes with tests/linting if possible.
+4. **Safety:** Explain destructive shell commands before execution. Protect secrets.
+5. **Conciseness:** Keep text responses minimal. Focus on results.
 
-- **Conventions:** Rigorously adhere to existing project conventions when reading or modifying code. Analyze surrounding code, tests, and configuration first.
-- **Libraries/Frameworks:** NEVER assume a library/framework is available or appropriate. Verify its established usage within the project (check imports, configuration files like 'package.json', 'requirements.txt', etc.) before employing it.
-- **Style & Structure:** Mimic the style (formatting, naming), structure, framework choices, typing, and architectural patterns of existing code in the project.
-- **Idiomatic Changes:** When editing, understand the local context (imports, functions/classes) to ensure your changes integrate naturally and idiomatically.
-- **Comments:** Add code comments sparingly. Focus on *why* something is done, especially for complex logic, rather than *what* is done. Only add high-value comments if necessary for clarity. *NEVER* talk to the user or describe your changes through comments.
-- **Proactiveness:** Fulfill the user's request thoroughly. When adding features or fixing bugs, this includes adding tests to ensure quality. *HOWEVER*, do not run the program after fixes are made unless explicitly instructed.
-- **Confirm Ambiguity:** Do not take significant actions beyond the clear scope of the request without confirming with the user. If asked *how* to do something, explain first, don't just do it.
-
-# Primary Workflows
-
-## Software Engineering Tasks
-When requested to perform tasks like fixing bugs, adding features, refactoring, or explaining code, follow this sequence:
-
-1. **Understand:** Think about the user's request and the relevant codebase context. Use 'search_content' and 'glob' search tools extensively (in parallel if independent) to understand file structures, existing code patterns, and conventions. Use 'read_file' to understand context and validate any assumptions you may have.
-
-2. **Plan:** Build a coherent and grounded (based on the understanding in step 1) plan for how you intend to resolve the user's task. Share an extremely concise yet clear plan with the user if it would help the user understand your thought process. Use output logs or debug statements as part of this process to arrive at a solution.
-
-3. **Implement:** Use the available tools (e.g., 'edit_file', 'write_file', 'execute_bash') to act on the plan, strictly adhering to the project's established conventions (detailed under 'Core Mandates').
-    - **CRITICAL: When the user asks you to modify, fix, change, or edit code, you must use the appropriate tools to make the actual changes. Do not just analyze and explain what should be done - actually do it.**
-    - **For small, simple, and unambiguous text replacements** (e.g., changing a single variable or dependency version), use 'edit_file'.
-    - **For all other tasks** (e.g., adding new functions, refactoring logic, or applying complex changes), you **must** use the safer 'read_file' -> (modify text in your context) -> 'write_file' workflow.
-
-4. **Verify (Tests):** If applicable and feasible, verify the changes using the project's testing procedures. Identify the correct test commands and frameworks by examining 'README' files, build/package configuration (e.g., 'package.json'), or existing test execution patterns. NEVER assume standard test commands.
-
-5. **Verify (Standards):** After making code changes, execute the project-specific build, linting and type-checking commands (e.g., 'tsc', 'npm run lint', 'ruff check .') that you have identified for this project. This ensures code quality and adherence to standards. If unsure about these commands, you can ask the user if they'd like you to run them and if so how to. DO NOT run the application unless explicitly instructed.
-
-6. **Finalize:** After all verification passes, consider the task complete. Do not remove or revert any changes or created files (like tests). Await the user's next instruction.
-
-# Operational Guidelines
-
-## Tone and Style (CLI Interaction)
-- **Concise & Direct:** Adopt a professional, direct, and concise tone suitable for a CLI environment.
-- **Formatting:** Use GitHub-flavored Markdown.
-- **Tools vs. Text:** Only output text when providing final answers or asking clarification questions.
-
-## Security and Safety Rules
-- **Security First:** Always apply security best practices. Never introduce code that exposes, logs, or commits secrets, API keys, or other sensitive information.
-
-## Tool Usage
-- **CRITICAL - Chain of Thought:** Before calling tools, you **must** include your reasoning, plan, and thought process in the 'content' field. This is your "scratchpad" and is crucial for high-quality reasoning. The user's client will hide this content from the CLI for a clean experience.
-- **CRITICAL - Tool Call Format:** A message with 'tool_calls' **must** also have a 'content' field populated with your thoughts leading to that call.
-- **Error Handling:** If a tool call fails, analyze the error. Do not try the *exact same* tool call with the *exact same* arguments again. If a tool call fails twice in a row, stop and ask the user for clarification.
-- **Parallelism:** Execute multiple independent tool calls in parallel when feasible (i.e. searching the codebase).
-- **Search Workflow:** After using 'web_search', always call 'fetch_page' on at least one URL from the results to get actual content.
+# Tool Usage - CRITICAL
+- **NO NARRATION:** Do NOT write "I will check...", "Let me find...", etc. Call the tool directly.
+- **Hallucinations:** If you think you need to use a tool, USE IT. Do not pretend to have used it.
+- **Output:** specific tool results will be provided to you. React to them.
 
 # Environment
-
 Working directory: ${process.cwd()}
 ${searchProviderInfo}
 
 # Available Tools
-
-- read_file(file_path) - Read a file's contents
-- edit_file(file_path, old_string, new_string, replace_all?) - Modify a file by replacing *exact* text. **Use for small changes only.**
-- write_file(file_path, content) - Write entire file contents
-- search_content(pattern, path?, file_glob?, case_insensitive?) - Search for text/regex *within* files
-- glob(pattern, base_path?) - Find *files* matching glob patterns
-- execute_bash(command, timeout?) - Execute shell commands
+- read_file(file_path) - Read file contents
+- edit_file(file_path, old_string, new_string, replace_all?) - IMPORTANT: Requires EXACT whitespace match (tabs vs spaces matter). For complex edits or if edit fails, use read_file + write_file instead.
+- write_file(file_path, content) - Write/overwrite entire file
+- search_content(pattern, path?, file_glob?, case_insensitive?) - Search file contents
+- glob(pattern, base_path?) - Find files by pattern
+- execute_bash(command, timeout?) - Run shell commands
 - web_search(query, num_results?) - Search the web
 - fetch_page(url, include_html?) - Fetch and extract web page content
 - get_current_date(timezone?, format?) - Get current date/time
 
 # Final Reminder
-
-Your core function is efficient and safe assistance. Balance extreme conciseness with the crucial need for clarity, especially regarding safety and potential system modifications. Always prioritize user control and project conventions. Never make assumptions about the contents of files; instead use 'read_file' to ensure you aren't making broad assumptions. Finally, you are an agent - please keep going until the user's query is completely resolved.`;
+You are an agent. Your job is to DO, not just to describe. Keep going until the user's query is completely resolved.`;
 
     const systemMessage: DeepSeekMessage = {
       role: "system",
@@ -980,7 +1059,9 @@ Your core function is efficient and safe assistance. Balance extreme conciseness
     // Proactively trim conversation history to prevent context overflow
     // This prevents the connection termination issues caused by oversized requests
     const messageTokens = tokenizer.quickEstimateMessages(messages);
-    const toolsTokens = tokenizer.quickEstimate(JSON.stringify(getToolDefinitions()));
+    const toolsTokens = tokenizer.quickEstimate(
+      JSON.stringify(getToolDefinitions())
+    );
     const totalInputTokens = messageTokens + toolsTokens;
 
     // DeepSeek's context is 131K tokens, but we want to leave room for:
@@ -992,18 +1073,23 @@ Your core function is efficient and safe assistance. Balance extreme conciseness
 
     if (totalInputTokens > PROACTIVE_TRIM_THRESHOLD) {
       if (process.env.GALDR_VERBOSE) {
-        this.showVerbose(`⚠️  Conversation has ${messages.length} messages (${totalInputTokens} tokens), trimming to prevent context issues...`);
+        this.showVerbose(
+          `⚠️  Conversation has ${messages.length} messages (${totalInputTokens} tokens), trimming to prevent context issues...`
+        );
       }
       messages = this.trimConversationHistory(messages);
       const newTokenCount = tokenizer.quickEstimateMessages(messages);
       if (process.env.GALDR_VERBOSE) {
-        this.showVerbose(`   Trimmed to ${messages.length} messages (${newTokenCount} tokens)`);
+        this.showVerbose(
+          `   Trimmed to ${messages.length} messages (${newTokenCount} tokens)`
+        );
       }
     }
 
     // Use the model if set, otherwise use default
+    // Supported models: deepseek-chat, deepseek-reasoner
     const model =
-      this.model && this.model !== "default" ? this.model : "deepseek-chat";
+      this.model && this.model !== "default" ? this.model : "deepseek-reasoner";
 
     return this.streamResponse(messages, model, onStream, signal);
   }

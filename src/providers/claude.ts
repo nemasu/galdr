@@ -134,7 +134,7 @@ export class ClaudeProvider extends BaseProvider {
     // Check for actual error messages and JSON error flags
     const errorPatterns = [
       // Claude CLI specific session limit message
-      /Session limit reached/i,
+      /Limit reached/i,
     ];
 
     const matched = errorPatterns.some((pattern) => {

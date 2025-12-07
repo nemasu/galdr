@@ -3,6 +3,7 @@ import { Box, Text, useStdout } from 'ink';
 import { Provider } from '../../types/index.js';
 import { useKeypress, Key } from '../contexts/KeypressContext.js';
 import { TextBuffer } from '../utils/TextBuffer.js';
+import { InputHistory } from '../utils/InputHistory.js';
 import { ProviderBadge } from './ProviderBadge.js';
 import { CustomSpinner } from './CustomSpinner.js';
 import { getProviderColor } from './ProviderBadge.js';
@@ -15,6 +16,7 @@ interface InputAreaProps {
   isLoading?: boolean;
   label?: string;
   sessionName?: string;
+  inputHistory?: InputHistory;
 }
 
 export const InputArea: React.FC<InputAreaProps> = React.memo(({
@@ -25,11 +27,18 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
   isLoading = false,
   label = 'You> ',
   sessionName = 'default',
+  inputHistory,
 }) => {
   const [, forceUpdate] = useState(0);
   const [pasteInfo, setPasteInfo] = useState<{ lineCount: number } | null>(null);
   const { stdout } = useStdout();
   const color = getProviderColor(provider);
+
+  // Input history management - use provided instance or create new one
+  const internalInputHistory = React.useRef(inputHistory || new InputHistory());
+
+  // Track current input when not browsing history
+  const currentInputRef = React.useRef('');
 
   // Throttle updates to reduce flicker during typing
   const lastUpdateRef = React.useRef<number>(0);
@@ -73,6 +82,8 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
 
       const text = buffer.getText();
       if (text.trim()) {
+        // Add to history before submitting
+        internalInputHistory.current.add(text.trim());
         onSubmit(text.trim());
         buffer.clear();
         setPasteInfo(null);
@@ -96,7 +107,61 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
       return;
     }
 
-    // Handle arrow keys
+    // Handle arrow keys for history navigation
+    if (key.name === 'up' && !key.ctrl) {
+      // Up arrow for history navigation (only when not in multi-line editing)
+      const text = buffer.getText();
+      if (!text.includes('\n')) {
+        // Save current input if we're starting to browse history
+        if (internalInputHistory.current.getCurrentIndex() === -1) {
+          currentInputRef.current = text;
+        }
+        
+        const previous = internalInputHistory.current.getPrevious();
+        if (previous !== null) {
+          buffer.setText(previous);
+          buffer.moveToEnd();
+          setPasteInfo(null);
+          forceUpdate((n) => n + 1);
+        }
+        return;
+      } else {
+        // Multi-line editing - use regular up arrow behavior
+        buffer.moveUp();
+        throttledForceUpdate();
+      }
+      return;
+    }
+
+    if (key.name === 'down' && !key.ctrl) {
+      // Down arrow for history navigation (only when not in multi-line editing)
+      const text = buffer.getText();
+      if (!text.includes('\n')) {
+        const next = internalInputHistory.current.getNext();
+        if (next !== null) {
+          buffer.setText(next);
+          buffer.moveToEnd();
+          setPasteInfo(null);
+          forceUpdate((n) => n + 1);
+        } else if (internalInputHistory.current.getCurrentIndex() === -1) {
+          // Already at current input, do nothing
+        } else {
+          // Return to original input
+          buffer.setText(currentInputRef.current);
+          buffer.moveToEnd();
+          setPasteInfo(null);
+          forceUpdate((n) => n + 1);
+        }
+        return;
+      } else {
+        // Multi-line editing - use regular down arrow behavior
+        buffer.moveDown();
+        throttledForceUpdate();
+      }
+      return;
+    }
+
+    // Handle left/right arrow keys
     if (key.name === 'left') {
       if (key.ctrl) {
         buffer.moveToWordStart();
@@ -113,18 +178,6 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
       } else {
         buffer.moveRight();
       }
-      throttledForceUpdate();
-      return;
-    }
-
-    if (key.name === 'up') {
-      buffer.moveUp();
-      throttledForceUpdate();
-      return;
-    }
-
-    if (key.name === 'down') {
-      buffer.moveDown();
       throttledForceUpdate();
       return;
     }
@@ -156,7 +209,6 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
       forceUpdate((n) => n + 1);
       return;
     }
-
 
     // Handle Ctrl+K (delete to end)
     if (key.ctrl && key.name === 'k') {
@@ -272,8 +324,11 @@ export const InputArea: React.FC<InputAreaProps> = React.memo(({
     cursorCol = text.length;
   }
 
+  const isVerbose = process.env.GALDR_VERBOSE === '1';
+  const borderColor = isVerbose ? 'green' : 'gray';
+
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1} width="100%">
+    <Box flexDirection="column" borderStyle="single" borderColor={borderColor} paddingX={1} width="100%">
       {/* Provider badge and status */}
       <Box marginBottom={1}>
         {isLoading ? (

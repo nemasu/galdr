@@ -11,6 +11,7 @@ import { OutputItem } from './components/OutputItem.js';
 import { KeypressProvider, useKeypress, Key } from './contexts/KeypressContext.js';
 import { TextBuffer } from './utils/TextBuffer.js';
 import { InputArea } from './components/InputArea.js';
+import { InputHistory } from './utils/InputHistory.js';
 import { InkWriter, InkWriterCallbacks } from './utils/InkWriter.js';
 import chalk from 'chalk';
 import { verboseLogger } from '../utils/logger.js';
@@ -39,6 +40,15 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
   const [initialPromptProcessed, setInitialPromptProcessed] = useState(false);
   const [bufferUpdateTrigger, setBufferUpdateTrigger] = useState(0);
   const [initialMessageCount, setInitialMessageCount] = useState(0);
+
+  // Input history management - load from session data on app start
+  const inputHistory = useMemo(() => {
+    const history = new InputHistory();
+    // Load user messages from the current session
+    const userMessages = messages.filter(msg => msg.role === 'user');
+    history.loadFromSession(userMessages);
+    return history;
+  }, []);
 
   // Memoize switch mode to prevent unnecessary re-renders
   const switchMode = useMemo(() => context.getSwitchMode(), [context]);
@@ -70,37 +80,11 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
     return [startupMessage, ...messages];
   }, [messages, initialMessageCount, startupMessage]);
 
-  // Keep only recent history to avoid performance issues (last 50 messages)
-  const recentHistory = useMemo(() => {
-    const maxHistory = 50;
-    if (completedMessages.length > maxHistory) {
-      return completedMessages.slice(-maxHistory);
-    }
-    return completedMessages;
-  }, [completedMessages]);
 
-  // Memoize the rendered history items to prevent Static from re-rendering
-  const historyItems = useMemo(
-    () => {
-      if (process.env.GALDR_VERBOSE === '1') {
-        verboseLogger.log(`[historyItems] recentHistory.length=${recentHistory.length}`);
-        recentHistory.forEach((msg, idx) => {
-          verboseLogger.log(`  [${idx}] role=${msg.role}, content=${msg.content.substring(0, 50)}...`);
-        });
-      }
 
-      return recentHistory.map((msg) => (
-        <OutputItem
-          key={msg.timestamp}
-          message={msg}
-          currentProvider={currentProvider}
-          switchMode={switchMode}
-          initialMessageCount={initialMessageCount}
-        />
-      ));
-    },
-    [recentHistory, currentProvider, switchMode, initialMessageCount]
-  );
+
+
+
 
   // Process initial prompt if provided (after component is fully initialized)
   useEffect(() => {
@@ -691,6 +675,8 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
     let accumulatedStreamItems: StreamItem[] = [];
     let messageTimestampCounter = Date.now(); // Ensure unique timestamps for split messages
     let lastSavedContent = ''; // Track last saved content to avoid redundant saves
+    let flushedContent = ''; // Track content that's been moved to static area
+    let flushedStreamItems: StreamItem[] = []; // Track stream items that have been flushed
 
     // Helper to get full text content from all text items
     const getFullTextContent = () => {
@@ -703,7 +689,7 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
     // Helper to save completed content to context incrementally
     const saveCompletedContent = async (content: string) => {
       if (content === lastSavedContent) return; // Avoid redundant saves
-      
+
       try {
         // Try to update the last assistant message, or create a new one
         const updated = context.updateLastAssistantMessage(content, provider);
@@ -711,11 +697,112 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
           // No existing assistant message found, create a new one
           await context.addMessage('assistant', content, provider);
         }
-        
+
         lastSavedContent = content;
       } catch (error) {
         console.error('Failed to save incremental content:', error);
       }
+    };
+
+    // Helper to flush completed content to static area (red box)
+    // If forceFlushAll is true, flush everything including incomplete lines
+    const flushCompletedContent = (forceFlushAll: boolean = false) => {
+      const currentContent = getFullTextContent();
+
+      if (forceFlushAll) {
+        // Flush all remaining content, even incomplete lines
+        const newContent = currentContent.substring(flushedContent.length);
+
+        if (newContent.trim().length === 0) {
+          // No meaningful new content to flush
+          if (process.env.GALDR_VERBOSE === '1') {
+            verboseLogger.log(`[FLUSH] Force flush requested but no new content`);
+          }
+          return;
+        }
+
+        // Add the flushed content as a completed message in the static area
+        messageTimestampCounter++;
+        const flushedMessage: Message = {
+          role: 'assistant',
+          content: newContent,
+          timestamp: messageTimestampCounter,
+          provider,
+          streamItems: [{ type: 'text', text: newContent }],
+          isContinuation: flushedContent.length === 0 ? false : true, // Mark as continuation to suppress header/separator
+        };
+
+        // Update flushed content tracker FIRST to prevent race conditions
+        flushedContent = currentContent;
+
+        if (process.env.GALDR_VERBOSE === '1') {
+          verboseLogger.log(`[FLUSH] *** FORCE FLUSHING ALL CONTENT TO STATIC AREA ***`);
+          verboseLogger.log(`[FLUSH] Flushing ${newContent.length} chars (including incomplete lines)`);
+          verboseLogger.log(`[FLUSH] Content preview: ${newContent.substring(0, 200)}...`);
+        }
+
+        setMessages((prev) => [...prev, flushedMessage]);
+        return;
+      }
+
+      // Normal flush: only flush complete lines (ending with newline)
+      const lastNewlineIndex = currentContent.lastIndexOf('\n');
+
+      // Check if there are new complete lines after what we've already flushed
+      if (lastNewlineIndex === -1 || lastNewlineIndex < flushedContent.length) {
+        // No new complete lines to flush
+        if (process.env.GALDR_VERBOSE === '1') {
+          verboseLogger.log(`[FLUSH] No new lines to flush. lastNewlineIndex=${lastNewlineIndex}, flushedContent.length=${flushedContent.length}`);
+        }
+        return;
+      }
+
+      // Extract only the NEW content that needs to be flushed
+      const newContent = currentContent.substring(flushedContent.length, lastNewlineIndex + 1);
+
+      if (newContent.trim().length === 0) {
+        // No meaningful new content to flush
+        if (process.env.GALDR_VERBOSE === '1') {
+          verboseLogger.log(`[FLUSH] New content is empty/whitespace only`);
+        }
+        return;
+      }
+
+      // Remove trailing newline from flushed content to avoid extra spacing
+      const contentToDisplay = newContent.endsWith('\n') ? newContent.slice(0, -1) : newContent;
+
+      // Add the flushed content as a completed message in the static area
+      messageTimestampCounter++;
+      const flushedMessage: Message = {
+        role: 'assistant',
+        content: contentToDisplay,
+        timestamp: messageTimestampCounter,
+        provider,
+        streamItems: [{ type: 'text', text: contentToDisplay }],
+        isContinuation: flushedContent.length === 0 ? false : true, // Mark as continuation to suppress header/separator
+      };
+
+      // Update flushed content tracker FIRST to prevent race conditions
+      // (before calling setMessages, so if updatePendingMessage is called again
+      // before React re-renders, we won't flush the same content twice)
+      flushedContent = currentContent.substring(0, lastNewlineIndex + 1);
+
+      if (process.env.GALDR_VERBOSE === '1') {
+        verboseLogger.log(`[FLUSH] *** FLUSHING CONTENT TO STATIC AREA ***`);
+        verboseLogger.log(`[FLUSH] Moving ${newContent.split('\n').length - 1} lines to static area`);
+        verboseLogger.log(`[FLUSH] New content length: ${newContent.length} chars`);
+        verboseLogger.log(`[FLUSH] Total flushed content now: ${flushedContent.length} chars`);
+        verboseLogger.log(`[FLUSH] Content preview: ${newContent.substring(0, 200)}...`);
+        verboseLogger.log(`[FLUSH] Message timestamp: ${flushedMessage.timestamp}`);
+        verboseLogger.log(`[FLUSH] Message content: "${contentToDisplay}"`);
+      }
+
+      setMessages((prev) => {
+        if (process.env.GALDR_VERBOSE === '1') {
+          verboseLogger.log(`[FLUSH] Adding flushed message to static area. prev.length=${prev.length}`);
+        }
+        return [...prev, flushedMessage];
+      });
     };
 
     // Helper to update pending message
@@ -727,12 +814,38 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         await saveCompletedContent(currentContent);
       }
 
+      // Flush completed lines to static area
+      flushCompletedContent();
+
+      // Only show unflushed content in pending message
+      const unflushedContent = currentContent.substring(flushedContent.length);
+
+      if (process.env.GALDR_VERBOSE === '1') {
+        verboseLogger.log(`[updatePendingMessage] Total content: ${currentContent.length} chars, flushed: ${flushedContent.length} chars, unflushed: ${unflushedContent.length} chars`);
+      }
+
+      // Build unflushed stream items - only include unflushed text
+      // Tools are added directly to static area, not shown in pending
+      const unflushedStreamItems: StreamItem[] = [];
+
+      // Add unflushed text content if any
+      if (unflushedContent.length > 0) {
+        unflushedStreamItems.push({ type: 'text', text: unflushedContent });
+      }
+
+      // Add only info items (not tools - they go to static area)
+      for (const item of accumulatedStreamItems) {
+        if (item.type === 'info') {
+          unflushedStreamItems.push(item);
+        }
+      }
+
       setPendingMessage({
         role: 'assistant',
-        content: currentContent,
-        timestamp: messageTimestampCounter, // Use consistent timestamp
+        content: unflushedContent,
+        timestamp: messageTimestampCounter,
         provider,
-        streamItems: [...accumulatedStreamItems],
+        streamItems: unflushedStreamItems,
       });
     };
 
@@ -756,12 +869,39 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
         await updatePendingMessage();
       },
       onToolUse: async (name: string, parameters?: any) => {
+        // When a tool starts, flush all text content (even incomplete lines) to preserve order
+        flushCompletedContent(true);
+
         const toolId = `tool-${currentToolId++}`;
         const toolInfo: ToolInfo = { id: toolId, name, parameters, status: 'running' };
         const newItem = { type: 'tool' as const, tool: toolInfo };
         accumulatedStreamItems.push(newItem);
 
-        await updatePendingMessage();
+        // Add the tool as a new message in static area
+        messageTimestampCounter++;
+        const toolMessage: Message = {
+          role: 'assistant',
+          content: '',
+          timestamp: messageTimestampCounter,
+          provider,
+          streamItems: [newItem],
+          isContinuation: true,
+        };
+
+        if (process.env.GALDR_VERBOSE === '1') {
+          verboseLogger.log(`[TOOL] Adding tool to static area: ${name}`);
+        }
+
+        setMessages((prev) => [...prev, toolMessage]);
+
+        // Update pending to clear out the blue box
+        setPendingMessage({
+          role: 'assistant',
+          content: '',
+          timestamp: messageTimestampCounter,
+          provider,
+          streamItems: [],
+        });
       },
       onToolComplete: async (success: boolean) => {
         // Find the last tool item and update its status
@@ -771,11 +911,26 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
               ...accumulatedStreamItems[i],
               tool: { ...accumulatedStreamItems[i].tool!, status: success ? 'success' : 'failed' }
             };
+
+            // Update the tool message in static area
+            setMessages((prev) => {
+              const updated = [...prev];
+              // Find the most recent message with this tool
+              for (let j = updated.length - 1; j >= 0; j--) {
+                if (updated[j].streamItems?.some(item => item.type === 'tool' && item.tool?.id === accumulatedStreamItems[i].tool?.id)) {
+                  updated[j] = {
+                    ...updated[j],
+                    streamItems: [accumulatedStreamItems[i]],
+                  };
+                  break;
+                }
+              }
+              return updated;
+            });
+
             break;
           }
         }
-
-        await updatePendingMessage();
       },
       onInfo: async (message: string) => {
         const newItem = { type: 'info' as const, info: message };
@@ -802,61 +957,95 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
     // Get final text content from all text items
     const finalTextContent = getFullTextContent();
 
-    // Final update with complete content
+    // Get any remaining unflushed content
+    const remainingContent = finalTextContent.substring(flushedContent.length);
+
+    // Build stream items for only the remaining unflushed content
+    const remainingStreamItems: StreamItem[] = [];
+    if (remainingContent.length > 0) {
+      remainingStreamItems.push({ type: 'text', text: remainingContent });
+    }
+
+    // Add any info items that haven't been flushed
+    for (const item of accumulatedStreamItems) {
+      if (item.type === 'info') {
+        remainingStreamItems.push(item);
+      }
+    }
+
+    // Extract tools from stream items (already in static area, just for the tools field)
+    const tools = accumulatedStreamItems
+      .filter(item => item.type === 'tool')
+      .map(item => item.tool!)
+      .filter(tool => tool !== undefined);
+
+    // Final update with remaining unflushed content
     messageTimestampCounter++;
     const finalPendingMessage: Message = {
       role: 'assistant',
-      content: finalTextContent,
+      content: remainingContent,
       timestamp: messageTimestampCounter,
       provider,
-      streamItems: [...accumulatedStreamItems],
+      streamItems: remainingStreamItems,
+      tools: tools.length > 0 ? tools : undefined,
     };
     setPendingMessage(finalPendingMessage);
 
     setIsLoading(false);
 
-    if (result.success && result.response) {
-      // Extract tools from stream items
-      const tools = accumulatedStreamItems
-        .filter(item => item.type === 'tool')
-        .map(item => item.tool!)
-        .filter(tool => tool !== undefined);
+    if (result.success) {
+      // Only add remaining unflushed content to history (if any)
+      if (remainingContent.trim().length > 0) {
+        messageTimestampCounter++;
+        const completedMessage: Message = {
+          role: 'assistant',
+          content: remainingContent || result.response || '',
+          timestamp: messageTimestampCounter,
+          provider,
+          streamItems: remainingStreamItems,
+          tools: tools.length > 0 ? tools : undefined,
+        };
 
-      // Move pending message to completed history
-      messageTimestampCounter++;
-      const completedMessage: Message = {
-        role: 'assistant',
-        content: finalTextContent || result.response,
-        timestamp: messageTimestampCounter,
-        provider,
-        tools: tools.length > 0 ? tools : undefined,
-        streamItems: accumulatedStreamItems.length > 0 ? accumulatedStreamItems : undefined,
-      };
-
-      // Debug logging to track message completion
-      if (process.env.GALDR_VERBOSE === '1') {
-        verboseLogger.log(`=== MESSAGE COMPLETION DEBUG ===`);
-        verboseLogger.log(`Stream items count: ${accumulatedStreamItems.length}`);
-        verboseLogger.log(`Final text content length: ${finalTextContent.length}`);
-        verboseLogger.log(`Tools count: ${tools.length}`);
-        verboseLogger.log(`Content preview (first 500 chars): ${finalTextContent.substring(0, 500)}`);
-        verboseLogger.log(`Content preview (last 500 chars): ${finalTextContent.substring(Math.max(0, finalTextContent.length - 500))}`);
-        verboseLogger.log(`STEP 1: About to add completedMessage to history`);
-        verboseLogger.log(`================================`);
-      }
-
-      // Add to history and clear pending message
-      setMessages((prev) => {
+        // Debug logging to track message completion
         if (process.env.GALDR_VERBOSE === '1') {
-          verboseLogger.log(`STEP 2: setMessages called, adding completed message`);
+          verboseLogger.log(`=== MESSAGE COMPLETION DEBUG ===`);
+          verboseLogger.log(`Remaining text content length: ${remainingContent.length}`);
+          verboseLogger.log(`Flushed content length: ${flushedContent.length}`);
+          verboseLogger.log(`Total content length: ${finalTextContent.length}`);
+          verboseLogger.log(`STEP 1: About to add final completedMessage to history`);
+          verboseLogger.log(`================================`);
         }
-        return [...prev, completedMessage];
-      });
+
+        // Add to history
+        setMessages((prev) => {
+          if (process.env.GALDR_VERBOSE === '1') {
+            verboseLogger.log(`STEP 2: setMessages called, adding final completed message`);
+            verboseLogger.log(`STEP 2: prev.length=${prev.length}, new length will be ${prev.length + 1}`);
+          }
+          const newMessages = [...prev, completedMessage];
+          if (process.env.GALDR_VERBOSE === '1') {
+            verboseLogger.log(`STEP 2: Message added. Total messages now: ${newMessages.length}`);
+          }
+          return newMessages;
+        });
+      } else {
+        if (process.env.GALDR_VERBOSE === '1') {
+          verboseLogger.log(`=== MESSAGE COMPLETION DEBUG ===`);
+          verboseLogger.log(`No remaining content to add - all content was flushed during streaming`);
+          verboseLogger.log(`Flushed content length: ${flushedContent.length}`);
+          verboseLogger.log(`Total content length: ${finalTextContent.length}`);
+          verboseLogger.log(`================================`);
+        }
+      }
 
       if (process.env.GALDR_VERBOSE === '1') {
         verboseLogger.log(`STEP 3: About to clear pendingMessage`);
       }
       setPendingMessage(null);
+
+      if (process.env.GALDR_VERBOSE === '1') {
+        verboseLogger.log(`STEP 4: pendingMessage cleared. Message should now be in history.`);
+      }
 
       // Final save to ensure everything is persisted
       context.save();
@@ -973,7 +1162,7 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
           currentProvider={currentProvider}
           switchMode={switchMode}
           initialMessageCount={initialMessageCount}
-          historyItems={historyItems}
+          messages={completedMessages}
           notifications={notifications}
           pendingMessage={pendingMessage}
           isLoading={isLoading}
@@ -990,6 +1179,7 @@ const GaldrApp: React.FC<GaldrAppProps> = ({ context, providerManager, initialPr
           provider={currentProvider}
           isLoading={isLoading}
           sessionName={currentSession}
+          inputHistory={inputHistory}
         />
       </Box>
     </Box>

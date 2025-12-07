@@ -23,6 +23,7 @@ export interface Message {
   provider?: Provider;
   tools?: ToolInfo[];
   streamItems?: StreamItem[];
+  isContinuation?: boolean; // True if this is a mid-stream flushed chunk
 }
 
 export interface ConversationContext {

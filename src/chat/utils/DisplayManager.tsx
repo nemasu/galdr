@@ -356,20 +356,26 @@ export class DisplayManager {
    */
   public renderAssistantMessage(
     message: Message,
-    isStreaming: boolean = false
+    isStreaming: boolean = false,
+    currentProvider?: Provider
   ): React.ReactNode {
-    const color = message.provider ? getProviderColor(message.provider) : 'magenta';
-    const providerName = message.provider
-      ? message.provider.charAt(0).toUpperCase() + message.provider.slice(1)
+    const effectiveProvider = message.provider || currentProvider;
+    const color = effectiveProvider ? getProviderColor(effectiveProvider) : 'magenta';
+    const providerName = effectiveProvider
+      ? effectiveProvider.charAt(0).toUpperCase() + effectiveProvider.slice(1)
       : 'Assistant';
 
     const hasStreamItems = message.streamItems && message.streamItems.length > 0;
+    const isContinuation = message.isContinuation || false;
 
     return (
-      <Box flexDirection="column" marginY={1} paddingX={1}>
-        <Text bold color={color}>
-          {providerName}:
-        </Text>
+      <Box flexDirection="column" marginY={isContinuation ? 0 : 1} paddingX={1}>
+        {/* Only show provider header for non-continuation messages */}
+        {!isContinuation && (
+          <Text bold color={color}>
+            {providerName}:
+          </Text>
+        )}
 
         {/* Render stream items in order (text and tools interleaved) */}
         {hasStreamItems ? (
@@ -390,8 +396,8 @@ export class DisplayManager {
           </>
         )}
 
-        {/* Separator line (only for non-streaming completed messages) */}
-        {!isStreaming && (
+        {/* Separator line (only for non-streaming, non-continuation completed messages) */}
+        {!isStreaming && !isContinuation && (
           <Box marginTop={1}>
             {this.renderSeparator()}
           </Box>
@@ -430,7 +436,7 @@ export class DisplayManager {
     }
 
     // Handle assistant message
-    return this.renderAssistantMessage(message, isStreaming);
+    return this.renderAssistantMessage(message, isStreaming, currentProvider);
   }
 }
 
